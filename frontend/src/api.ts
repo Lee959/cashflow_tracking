@@ -33,16 +33,20 @@ export interface Bill {
   attachments: Attachment[]
 }
 
-export interface FixedCost {
+interface FixedCostBase {
   biller: string
   category: string
   monthly: number
   yearly: number
   cadence: string
-  bills: number
-  last_amount: number
-  last_due_date: string | null
 }
+
+/** One line of the fixed bills: from bill emails, or entered by hand on the Settings page. */
+export type FixedCost = FixedCostBase &
+  (
+    | { source: 'email'; bills: number; last_amount: number; last_due_date: string | null }
+    | { source: 'manual'; id: number; amount: number; next_due_date: string | null }
+  )
 
 export interface FixedCosts {
   monthly: number
@@ -84,6 +88,34 @@ export interface Settings {
   sync: SyncStatus & { interval_hours: number; next_run_at: string | null; runs: SyncRun[] }
   billers: Biller[]
   config_error: string | null
+}
+
+export interface ManualCost {
+  id: number
+  name: string
+  category: string
+  amount: number
+  frequency: string
+  due_day: number | null
+  next_due_date: string | null
+  active: boolean
+  monthly: number
+}
+
+export interface ManualCostList {
+  items: ManualCost[]
+  frequencies: string[]
+  categories: string[]
+}
+
+export interface ManualCostInput {
+  name: string
+  amount: string
+  frequency: string
+  category: string
+  due_day: number | null
+  next_due_date: string | null
+  active: boolean
 }
 
 export interface Candidate {
@@ -153,4 +185,9 @@ export const api = {
   scanSenders: (days: number, refresh = false) =>
     request<ScanResult>(`/api/senders/scan?days=${days}${refresh ? '&refresh=true' : ''}`),
   addSenders: (senders: NewSender[]) => post<{ added: number }>('/api/senders', { senders }),
+  manualCosts: () => request<ManualCostList>('/api/manual-costs'),
+  addManualCost: (body: ManualCostInput) => post<ManualCost>('/api/manual-costs', body),
+  updateManualCost: (id: number, body: ManualCostInput) =>
+    request<ManualCost>(`/api/manual-costs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteManualCost: (id: number) => request<{ ok: true }>(`/api/manual-costs/${id}`, { method: 'DELETE' }),
 }

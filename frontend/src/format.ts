@@ -45,6 +45,14 @@ export function timeAgo(iso: string | null): string {
   return `${Math.round(hours / 24)} d ago`
 }
 
+export const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** 1 -> "1st", 22 -> "22nd", 13 -> "13th" */
+export function ordinal(n: number): string {
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')
+  return `${n}${suffix}`
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   utilities: 'Utilities',
   phone_internet: 'Phone & internet',

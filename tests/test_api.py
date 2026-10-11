@@ -6,14 +6,14 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, delete
 from sqlalchemy.orm import sessionmaker
 
 from app import api, db, google_auth, scheduler
-from app.bills import dashboard, service
+from app.bills import dashboard, manual, service
 from app.config import settings
 from app.main import app
-from app.models import Bill, BillEmail, SyncRun
+from app.models import Bill, BillEmail, ManualCost, SyncRun
 
 
 @pytest.fixture
@@ -137,3 +137,80 @@ def test_fixed_costs_spread_irregular_bills_per_month(client):
     assert fixed["monthly"] == pytest.approx(sum(i["monthly"] for i in fixed["items"]))
     assert "Triangle Mastercard" not in items  # card statements aren't fixed costs
     assert fixed["items"][0]["biller"] == "Ottawa Property Tax"  # biggest per month first
+
+
+def test_manual_costs_crud(client):
+    listing = client.get("/api/manual-costs").json()
+    assert listing["items"] == []
+    assert listing["frequencies"] == ["monthly", "every 2 months", "quarterly", "twice a year", "yearly"]
+    assert "utilities" in listing["categories"] and "credit_card" not in listing["categories"]
+
+    gym = {"name": " Anytime Fitness ", "amount": "$28.25", "category": "subscriptions", "due_day": 15}
+    res = client.post("/api/manual-costs", json=gym)
+    assert res.status_code == 201
+    created = res.json()
+    assert created["name"] == "Anytime Fitness" and created["frequency"] == "monthly"
+    assert (created["amount"], created["monthly"], created["due_day"], created["active"]) == (28.25, 28.25, 15, True)
+
+    heater = {"name": "Reliance water heater", "amount": "1,000", "frequency": "every 2 months",
+              "category": "utilities", "next_due_date": "2026-11-20"}
+    heater_id = client.post("/api/manual-costs", json=heater).json()["id"]
+    heater.update(amount="90.5", next_due_date="2026-08-20", active=False)
+    updated = client.put(f"/api/manual-costs/{heater_id}", json=heater).json()
+    assert (updated["amount"], updated["monthly"], updated["active"]) == (90.5, pytest.approx(45.25), False)
+    assert updated["next_due_date"] == "2026-10-20"  # moved forward past today by the frequency
+
+    names = [c["name"] for c in client.get("/api/manual-costs").json()["items"]]
+    assert names == ["Anytime Fitness", "Reliance water heater"]
+
+    for bad in [{"amount": "abc"}, {"amount": "0"}, {"amount": "NaN"}, {"name": "  "}, {"frequency": "weekly"},
+                {"category": "credit_card"}, {"due_day": 32}, {"next_due_date": "next week"}]:
+        res = client.post("/api/manual-costs", json={**gym, **bad})
+        assert res.status_code == 422 and isinstance(res.json()["detail"], str), bad
+
+    assert client.put("/api/manual-costs/999", json=gym).status_code == 404
+    assert client.delete(f"/api/manual-costs/{created['id']}").json() == {"ok": True}
+    assert client.delete(f"/api/manual-costs/{created['id']}").status_code == 404
+    assert [c["id"] for c in client.get("/api/manual-costs").json()["items"]] == [heater_id]
+
+
+def test_manual_costs_add_to_fixed_bills(client):
+    before = client.get("/api/dashboard").json()["fixed"]
+    cost = {"name": "My Ontario account", "amount": "120", "frequency": "yearly", "next_due_date": "2026-03-01"}
+    cost_id = client.post("/api/manual-costs", json=cost).json()["id"]
+
+    fixed = client.get("/api/dashboard").json()["fixed"]
+    assert fixed["monthly"] == pytest.approx(before["monthly"] + 10)
+    assert fixed["yearly"] == pytest.approx(before["yearly"] + 120)
+    assert [i for i in fixed["items"] if i["source"] == "email"] == before["items"]  # emailed bills untouched
+    item = next(i for i in fixed["items"] if i["source"] == "manual")
+    assert item == {"biller": "My Ontario account", "category": "other", "monthly": pytest.approx(10),
+                    "yearly": 120.0, "cadence": "once a year", "id": cost_id, "amount": 120.0,
+                    "next_due_date": "2027-03-01", "source": "manual"}
+
+    client.put(f"/api/manual-costs/{cost_id}", json={**cost, "active": False})  # paused: not counted
+    assert client.get("/api/dashboard").json()["fixed"] == before
+
+
+def test_manual_costs_alone_still_give_fixed_bills(client):
+    with db.session_scope() as s:
+        s.execute(delete(Bill))
+    assert client.get("/api/dashboard").json()["fixed"] is None
+    client.post("/api/manual-costs", json={"name": "Rogers Business Mobile", "amount": "65",
+                                           "category": "phone_internet", "due_day": 3})
+    fixed = client.get("/api/dashboard").json()["fixed"]
+    assert (fixed["monthly"], fixed["from_month"], fixed["months"]) == (65.0, "2026-10", 1)
+    assert fixed["items"][0]["next_due_date"] == "2026-11-03"  # the 3rd has passed this month
+
+
+def test_manual_cost_next_due_date():
+    def due(on, **kw):
+        return manual.next_due(ManualCost(**{"frequency": "monthly", **kw}), on)
+
+    assert due(date(2026, 10, 11), due_day=11) == date(2026, 10, 11)
+    assert due(date(2026, 11, 2), due_day=31) == date(2026, 11, 30)  # short month: last day
+    assert due(date(2026, 11, 2), due_day=31, frequency="quarterly") is None  # which month is unknown
+    quarterly = {"frequency": "quarterly", "next_due_date": date(2026, 1, 31)}
+    assert due(date(2026, 4, 1), **quarterly) == date(2026, 4, 30)
+    assert due(date(2026, 5, 1), **quarterly) == date(2026, 7, 31)  # counted from Jan 31, not Apr 30
+    assert due(date(2025, 6, 1), **quarterly) == date(2026, 1, 31)  # already in the future: as entered

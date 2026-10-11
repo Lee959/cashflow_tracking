@@ -79,7 +79,8 @@ export function Dashboard() {
 function MonthCard({ data, go }: { data: DashboardData; go: (m: string) => void }) {
   const isCurrent = data.month === data.current_month
   const paid = data.total - data.remaining
-  const usual = data.fixed?.monthly
+  // a month's bills only come from email, so compare with the emailed part of the fixed bills
+  const usual = data.fixed?.items.filter((i) => i.source === 'email').reduce((sum, i) => sum + i.monthly, 0)
   const diff = usual ? data.total - usual : null
   const daysUntil = data.next_bill?.due_date
     ? Math.round((localDate(data.next_bill.due_date).getTime() - localDate(data.today).getTime()) / 86_400_000)

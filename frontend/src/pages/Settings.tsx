@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { api, type Settings as SettingsData } from '../api'
+import { ManualCosts } from '../components/ManualCosts'
 import { TopBar } from '../components/TopBar'
 import { categoryLabel, dateTime, timeAgo } from '../format'
 
@@ -169,6 +170,8 @@ export function Settings() {
                 </div>
               </details>
             </section>
+
+            <ManualCosts />
           </div>
 
           <div className="stack">

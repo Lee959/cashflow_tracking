@@ -80,6 +80,28 @@ class Bill(Base):
     email: Mapped[BillEmail] = relationship(back_populates="bill")
 
 
+class ManualCost(Base):
+    """A recurring fixed cost entered by hand, for payments that never send a bill email.
+
+    frequency: monthly / every 2 months / quarterly / twice a year / yearly (see app/bills/manual.py)
+    due_day: day of the month it's paid (mostly for monthly costs)
+    next_due_date: any one due date; later ones are worked out from the frequency
+    active: False = paused, not counted in the fixed bills
+    """
+
+    __tablename__ = "manual_costs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    category: Mapped[str] = mapped_column(String(64), default="other")
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    frequency: Mapped[str] = mapped_column(String(16), default="monthly")
+    due_day: Mapped[int | None]
+    next_due_date: Mapped[date | None]
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+
+
 class PlaidItem(Base):
     """Phase 2: one row per bank login linked through Plaid Link (TD, RBC, CIBC)."""
 

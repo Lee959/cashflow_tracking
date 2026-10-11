@@ -8,7 +8,7 @@ from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
 from app import google_auth, scheduler
-from app.bills import dashboard, discover, service
+from app.bills import dashboard, discover, manual, service
 from app.bills.senders import (
     EXAMPLE_SENDERS,
     Biller,
@@ -19,7 +19,7 @@ from app.bills.senders import (
 )
 from app.config import settings
 from app.gmail_client import friendly_error
-from app.models import SyncRun
+from app.models import ManualCost, SyncRun
 
 router = APIRouter(prefix="/api")
 
@@ -40,12 +40,56 @@ class BillUpdate(BaseModel):
 @router.patch("/bills/{bill_id}")
 def update_bill(bill_id: int, body: BillUpdate):
     try:
-        amount = Decimal(body.amount.replace("$", "").replace(",", "").strip()) if body.amount else None
+        amount = _amount(body.amount)
         due = date.fromisoformat(body.due_date) if body.due_date else None
     except (InvalidOperation, ValueError):
         raise HTTPException(422, f"Couldn't read amount {body.amount!r} or date {body.due_date!r}")
     try:
         service.update_bill(bill_id, amount, due, ignored=body.ignored)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+class ManualCostBody(BaseModel):
+    name: str
+    amount: str
+    frequency: str = "monthly"
+    category: str = "other"
+    due_day: int | None = None
+    next_due_date: str | None = None
+    active: bool = True
+
+
+@router.get("/manual-costs")
+def list_manual_costs():
+    on = dashboard.today()
+    return {
+        "items": [_manual_cost_json(c, on) for c in manual.list_costs()],
+        "frequencies": list(manual.PER_YEAR),
+        "categories": manual.CATEGORIES,
+    }
+
+
+@router.post("/manual-costs", status_code=201)
+def add_manual_cost(body: ManualCostBody):
+    cost = manual.save_cost(None, **_manual_cost_fields(body))
+    return _manual_cost_json(cost, dashboard.today())
+
+
+@router.put("/manual-costs/{cost_id}")
+def update_manual_cost(cost_id: int, body: ManualCostBody):
+    try:
+        cost = manual.save_cost(cost_id, **_manual_cost_fields(body))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return _manual_cost_json(cost, dashboard.today())
+
+
+@router.delete("/manual-costs/{cost_id}")
+def delete_manual_cost(cost_id: int):
+    try:
+        manual.delete_cost(cost_id)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     return {"ok": True}
@@ -157,6 +201,54 @@ def add_senders(body: AddSenders):
                           subject_includes=(word,) if word else ()))
     add_billers(settings.bill_senders_file, new, header_from=settings.bill_senders_file.parent / "bill_senders.example.toml")
     return {"added": len(new)}
+
+
+def _amount(text: str | None) -> Decimal | None:
+    """Reads "$1,234.50" as Decimal("1234.50"). Raises InvalidOperation if it isn't a number."""
+    return Decimal(text.replace("$", "").replace(",", "").strip()) if text else None
+
+
+def _manual_cost_fields(body: ManualCostBody) -> dict:
+    """The form as ManualCost columns, or a 422 that says what to fix."""
+    try:
+        amount = _amount(body.amount)
+        due = date.fromisoformat(body.next_due_date) if body.next_due_date else None
+    except (InvalidOperation, ValueError):
+        raise HTTPException(422, f"Couldn't read amount {body.amount!r} or date {body.next_due_date!r}")
+    if not body.name.strip():
+        raise HTTPException(422, "Give it a name.")
+    if amount is None or not amount.is_finite() or not 0 < amount < 10**9:
+        raise HTTPException(422, "Enter an amount, like 45.20.")
+    if body.frequency not in manual.PER_YEAR:
+        raise HTTPException(422, f"How often should be one of: {', '.join(manual.PER_YEAR)}")
+    if body.category not in manual.CATEGORIES:
+        raise HTTPException(422, f"Unknown category {body.category!r}")
+    if body.due_day is not None and not 1 <= body.due_day <= 31:
+        raise HTTPException(422, "Day of the month should be 1 to 31.")
+    return {
+        "name": body.name.strip(),
+        "category": body.category,
+        "amount": amount.quantize(Decimal("0.01")),
+        "frequency": body.frequency,
+        "due_day": body.due_day,
+        "next_due_date": due,
+        "active": body.active,
+    }
+
+
+def _manual_cost_json(c: ManualCost, on: date) -> dict:
+    return {
+        "id": c.id,
+        "name": c.name,
+        "category": c.category,
+        "amount": float(c.amount),
+        "frequency": c.frequency,
+        "due_day": c.due_day,
+        # the entered date moved forward past today, so the form always shows the next one
+        "next_due_date": _iso(manual.next_due(c, on)) if c.next_due_date else None,
+        "active": c.active,
+        "monthly": float(manual.monthly(c)),
+    }
 
 
 def _sync_status() -> dict:

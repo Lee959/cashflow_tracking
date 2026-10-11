@@ -1,5 +1,6 @@
+import { Link } from 'react-router'
 import type { FixedCosts as FixedCostsData } from '../api'
-import { dayMonth, money, moneyWhole, monthShortYear } from '../format'
+import { capitalize, dayMonth, money, moneyWhole, monthShortYear } from '../format'
 
 /** The headline: what the household's regular bills cost per month, and which bills make it up. */
 export function FixedCosts({ fixed }: { fixed: FixedCostsData | null }) {
@@ -8,13 +9,16 @@ export function FixedCosts({ fixed }: { fixed: FixedCostsData | null }) {
       <section className="hero-panel glass">
         <div>
           <div className="eyebrow">Your fixed bills</div>
-          <p className="muted">No bills yet. Connect Gmail and pick your bill senders in Settings.</p>
+          <p className="muted">
+            No bills yet. Connect Gmail and pick your bill senders in Settings, or add fixed costs there by hand.
+          </p>
         </div>
       </section>
     )
 
   const [dollars, cents] = money(fixed.monthly).split('.')
   const largest = fixed.items[0].monthly
+  const byHand = fixed.items.filter((i) => i.source === 'manual').length
 
   return (
     <section className="hero-panel glass" aria-label="Your fixed bills">
@@ -27,14 +31,25 @@ export function FixedCosts({ fixed }: { fixed: FixedCostsData | null }) {
         </div>
         <div className="hero-sub">{moneyWhole(fixed.yearly)} a year</div>
         <p className="small muted hero-note">
-          Average of bills due {monthShortYear(fixed.from_month)} – {monthShortYear(fixed.to_month)}. Bills that come
-          every few months are spread across the months. Only bills found in Gmail are included.
+          {byHand < fixed.items.length && (
+            <>
+              Average of bills due {monthShortYear(fixed.from_month)} – {monthShortYear(fixed.to_month)}.{' '}
+            </>
+          )}
+          Bills that come every few months are spread across the months.{' '}
+          {byHand ? (
+            `Includes ${byHand} ${byHand === 1 ? 'cost' : 'costs'} entered by hand.`
+          ) : (
+            <>
+              Only bills found in Gmail are included; add others in <Link to="/settings">Settings</Link>.
+            </>
+          )}
         </p>
       </div>
 
       <ul className="fc-list">
         {fixed.items.map((item) => (
-          <li key={item.biller} className="fc-row">
+          <li key={item.source === 'manual' ? `manual-${item.id}` : item.biller} className="fc-row">
             <div className="fc-head">
               <span className="fc-name">{item.biller}</span>
               <span className="fc-value">
@@ -46,9 +61,19 @@ export function FixedCosts({ fixed }: { fixed: FixedCostsData | null }) {
               <div style={{ width: `${(item.monthly / largest) * 100}%` }} />
             </div>
             <div className="fc-meta">
-              {item.cadence[0].toUpperCase() + item.cadence.slice(1)} · last {money(item.last_amount)}
-              {item.last_due_date && <> due {dayMonth(item.last_due_date)}</>} ·{' '}
-              {Math.round((item.monthly / fixed.monthly) * 100)}% of the total
+              {capitalize(item.cadence)} ·{' '}
+              {item.source === 'manual' ? (
+                <>
+                  {money(item.amount)}
+                  {item.next_due_date && <> due {dayMonth(item.next_due_date)}</>} · entered by hand
+                </>
+              ) : (
+                <>
+                  last {money(item.last_amount)}
+                  {item.last_due_date && <> due {dayMonth(item.last_due_date)}</>}
+                </>
+              )}{' '}
+              · {Math.round((item.monthly / fixed.monthly) * 100)}% of the total
             </div>
           </li>
         ))}
