@@ -252,6 +252,7 @@ a {
 }
 
 .brand {
+  white-space: nowrap;
   font-weight: 650;
   letter-spacing: -0.01em;
   text-decoration: none;
@@ -266,6 +267,12 @@ a {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 12px var(--accent);
+}
+
+@media (max-width: 560px) {
+  .sync-text {
+    display: none;
+  }
 }
 
 .nav {
@@ -495,14 +502,6 @@ a:focus-visible {
   color: var(--ink-2);
 }
 
-.hero-figure .per {
-  margin-left: 10px;
-  font-size: 0.26em;
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--muted);
-}
-
 .hero-sub {
   font-size: 18px;
   font-weight: 550;
@@ -567,19 +566,81 @@ a:focus-visible {
   color: var(--muted);
 }
 
-/* ---------- month card ---------- */
+/* ---------- month hero: right column ---------- */
 
-.month-card .month-title {
-  font-size: 18px;
-  font-weight: 650;
-  color: var(--ink);
+.month-hero {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: stretch;
 }
 
-.split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 18px;
+@media (max-width: 860px) {
+  .month-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hero-progress {
+  margin: 18px 0 0;
+  max-width: 420px;
+}
+
+.hero-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+  padding-left: 32px;
+  border-left: 1px solid var(--hairline);
+}
+
+@media (max-width: 860px) {
+  .hero-side {
+    padding: 20px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+  }
+}
+
+.hero-compare strong {
+  font-weight: 650;
+}
+
+.hero-compare .label {
+  margin-bottom: 4px;
+}
+
+/* ---------- usual month ---------- */
+
+.usual-figure {
+  margin: -4px 0 18px;
+  font-size: 32px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.usual-figure .per {
+  margin-left: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+.payment-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.payment-line .chip {
+  font-size: 12.5px;
+  padding: 3px 10px;
+}
+
+.warn-text {
+  color: var(--warn);
 }
 
 .progress {

@@ -92,3 +92,22 @@ def test_real_world_formats():
 def test_dash_before_amount_is_not_a_credit():
     assert parse_bill("Amount due - $45.00", BILLER).amount == Decimal("45.00")
     assert parse_bill("New balance $310.20 CR", BILLER).amount == Decimal("-310.20")
+
+
+def test_detect_payment_from_bill_and_setup_emails():
+    from app.bills.parser import detect_payment
+
+    hydro = "Amount Due : $121.83 Automated Payment Withdrawal Date : 2026-10-19 Pay Now"
+    assert detect_payment(hydro) == ("bank_auto", None)
+    water = ("Due Date: 2026-10-08 Note: Your account is currently registered with pre-authorized debit. "
+             "Your payment will be automatically withdrawn. Pay now with a payment card")
+    assert detect_payment(water) == ("bank_auto", None)
+    bell_bank = ("we have changed the pre-authorized payment information for your Bell bill. Bell Account Number "
+                 "123456789 Account holder JANE DOE Bank Name RBC ROYAL BANK Transit number ***00 "
+                 "Bank account number ****321 If the above information is incorrect")
+    assert detect_payment(bell_bank) == ("bank_auto", "RBC ••321")
+    bell_card = ("we have changed the pre-authorized payment information for your Bell bill. Bell Account Number "
+                 "123456789 Cardholder Jane Doe Card type Visa Card number ************4242 Expiration date 09/2030")
+    assert detect_payment(bell_card) == ("card_auto", "Visa ••4242")
+    assert detect_payment("Amount Due : $-5.03 Due Date : 2026-09-25") is None
+    assert detect_payment("Pay now with your Visa ending in 1234") is None  # a card, but nothing automatic

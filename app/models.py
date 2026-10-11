@@ -76,8 +76,27 @@ class Bill(Base):
     due_date: Mapped[date | None]
     status: Mapped[str] = mapped_column(String(16), default="needs_review")
     parse_notes: Mapped[str] = mapped_column(Text, default="")
+    # how the bill gets paid, when the email says so (see parser.detect_payment)
+    payment_method: Mapped[str | None] = mapped_column(String(16))
+    payment_detail: Mapped[str | None] = mapped_column(String(64))
 
     email: Mapped[BillEmail] = relationship(back_populates="bill")
+
+
+class BillerPayment(Base):
+    """How a biller gets paid, beyond what its bill emails say: found in the biller's
+    payment-setup emails (e.g. Bell's "Change pre-authorized payments"), or set by hand."""
+
+    __tablename__ = "biller_payments"
+
+    biller: Mapped[str] = mapped_column(String(255), primary_key=True)
+    email_method: Mapped[str | None] = mapped_column(String(16))
+    email_detail: Mapped[str | None] = mapped_column(String(64))
+    email_date: Mapped[datetime | None]
+    email_subject: Mapped[str | None] = mapped_column(Text)
+    email_message_id: Mapped[str | None] = mapped_column(String(64))
+    user_method: Mapped[str | None] = mapped_column(String(16))
+    user_detail: Mapped[str | None] = mapped_column(String(64))
 
 
 class PlaidItem(Base):

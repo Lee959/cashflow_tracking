@@ -88,7 +88,8 @@ def parse_message(msg: dict, load_attachment: Callable[[str], bytes]) -> Fetched
         if filename:
             if _is_pdf(mime, filename) and body.get("size", 0) <= MAX_ATTACHMENT_BYTES:
                 data = _b64decode(body["data"]) if body.get("data") else load_attachment(body["attachmentId"])
-                attachments.append(FetchedAttachment(filename, mime, data))
+                if is_pdf_data(data):  # the name and declared type are the sender's word; the bytes aren't
+                    attachments.append(FetchedAttachment(filename, "application/pdf", data))
             continue
         if not body.get("data"):
             continue
@@ -138,6 +139,11 @@ def _walk(part: dict) -> Iterator[dict]:
     yield part
     for child in part.get("parts", []) or []:
         yield from _walk(child)
+
+
+def is_pdf_data(data: bytes) -> bool:
+    """PDFs start with a %PDF- header (allowed anywhere in the first 1 KB)."""
+    return b"%PDF-" in data[:1024]
 
 
 def _is_pdf(mime: str, filename: str) -> bool:

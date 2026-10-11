@@ -24,6 +24,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "current_month", lambda: "2026-10")
     monkeypatch.setattr(dashboard, "today", lambda: date(2026, 10, 11))
     monkeypatch.setattr(google_auth, "connected_account", lambda: "me@example.com")
+    monkeypatch.setattr(service, "refresh_payment_methods", lambda: 0)
     test_settings = dataclasses.replace(settings, data_dir=tmp_path, bill_senders_file=tmp_path / "none.toml")
     monkeypatch.setattr(api, "settings", test_settings)
 
@@ -42,7 +43,7 @@ def client(tmp_path, monkeypatch):
     add("Triangle Mastercard", "credit_card", "92.41", "2026-10-15")
     add("Bell Internet", "phone_internet", "56.50", "2026-09-08")
     add("Ottawa Property Tax", "housing", "2427.37", "2026-06-18")
-    return TestClient(app)
+    return TestClient(app, base_url="http://localhost")
 
 
 def test_dashboard_month(client):
@@ -137,3 +138,44 @@ def test_fixed_costs_spread_irregular_bills_per_month(client):
     assert fixed["monthly"] == pytest.approx(sum(i["monthly"] for i in fixed["items"]))
     assert "Triangle Mastercard" not in items  # card statements aren't fixed costs
     assert fixed["items"][0]["biller"] == "Ottawa Property Tax"  # biggest per month first
+
+
+def test_payment_method_precedence(client):
+    from app.models import BillerPayment
+
+    from sqlalchemy import select
+
+    with db.session_scope() as s:
+        s.scalars(select(Bill).where(Bill.biller == "Hydro Ottawa")).one().payment_method = "bank_auto"
+        s.add(BillerPayment(biller="Bell Internet", email_method="bank_auto", email_detail="RBC ••321",
+                            email_date=datetime(2026, 8, 19), email_subject="Confirmation - Change pre-authorized payments"))
+
+    d = client.get("/api/dashboard").json()
+    pay = {b["biller"]: b["payment"] for b in d["bills"]}
+    assert pay["Hydro Ottawa"]["method"] == "bank_auto" and pay["Hydro Ottawa"]["source"] == "email"
+    assert pay["Bell Internet"] == {"method": "bank_auto", "detail": "RBC ••321", "source": "email",
+                                    "source_date": "2026-08-19",
+                                    "source_subject": "Confirmation - Change pre-authorized payments"}
+    assert pay["Ottawa Water"] is None
+    assert d["next_bill"]["payment"]["method"] == "bank_auto"  # Hydro is next
+
+    # your own setting wins, and clearing it goes back to the email
+    r = client.put("/api/billers/Bell Internet/payment", json={"method": "card_auto", "detail": "Visa ••4242"})
+    assert r.json()["payment"]["source"] == "you"
+    assert {b["biller"]: b["payment"] for b in client.get("/api/dashboard").json()["bills"]}["Bell Internet"]["detail"] == "Visa ••4242"
+    client.put("/api/billers/Bell Internet/payment", json={"method": None})
+    assert {b["biller"]: b["payment"] for b in client.get("/api/dashboard").json()["bills"]}["Bell Internet"]["detail"] == "RBC ••321"
+    assert client.put("/api/billers/Bell Internet/payment", json={"method": "cash"}).status_code == 422
+
+
+def test_new_columns_are_added_to_an_existing_database(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    db.Base.metadata.create_all(engine)
+    with engine.begin() as conn:  # roll the bills table back to before payment_method existed
+        conn.execute(text("ALTER TABLE bills DROP COLUMN payment_method"))
+        conn.execute(text("ALTER TABLE bills DROP COLUMN payment_detail"))
+    db.add_missing_columns(engine)
+    columns = {c["name"] for c in inspect(engine).get_columns("bills")}
+    assert {"payment_method", "payment_detail"} <= columns

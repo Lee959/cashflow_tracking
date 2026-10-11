@@ -56,7 +56,7 @@ CONVERSATION_SUBJECT = re.compile(r"^\s*(re|fw|fwd|回复|转发|答复)\s*[:：
 
 
 def is_person(name: str, email: str) -> bool:
-    """'Jane Doe-Smith <jane_doe@work.example>': a person's own mailbox, even at a company domain."""
+    """'Jane Doe <jane_doe@work.example>': a person's own mailbox, even at a company domain."""
     letters = lambda s: re.sub(r"[^a-z]", "", s.lower())  # noqa: E731
     return len(name.split()) >= 2 and len(letters(name)) >= 5 and letters(name) in letters(email.split("@")[0])
 

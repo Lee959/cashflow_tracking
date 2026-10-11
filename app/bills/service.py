@@ -11,11 +11,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app import gmail_client, google_auth
-from app.bills.parser import parse_bill
+from app.bills.parser import detect_payment, parse_bill
 from app.bills.senders import Biller, find_biller, gmail_query, load_billers
 from app.config import settings
 from app.db import session_scope
-from app.models import Attachment, Bill, BillEmail
+from app.models import Attachment, Bill, BillEmail, BillerPayment
+
+# Emails where a company confirms how you pay it (Bell: "Confirmation - Change pre-authorized payments")
+PAYMENT_SETUP_QUERY = (
+    '(subject:"pre-authorized" OR subject:"pre-authorised" OR subject:"automatic payment" OR '
+    'subject:"autopay" OR subject:"auto pay" OR subject:"payment method" OR subject:"payment information")'
+)
 
 PDF_MAX_PAGES = 5
 # Card statements total up spending that's tracked elsewhere (and may include bills paid by card);
@@ -100,6 +106,57 @@ def sync_month(month: str, force: bool = False) -> SyncResult:
             result.new += 1
             _count(result, _apply_parse(s, email, biller))
     return result
+
+
+def refresh_payment_methods() -> int:
+    """Looks for each biller's latest payment-setup email and records the method it confirms.
+
+    Searches the biller's whole domain (Bell's setup emails come from noreply@bell.ca, its bills
+    from ebill@bell.ca), except when several billers share a domain (City of Ottawa water and
+    property tax): then only the biller's own addresses count. Returns how many billers changed.
+    """
+    billers = load_billers(settings.bill_senders_file)
+    service = gmail_client.build_service(google_auth.get_credentials())
+    domain_owners: dict[str, set[str]] = {}
+    for b in billers:
+        for sender in b.senders:
+            domain_owners.setdefault(_base_domain(sender), set()).add(b.name)
+
+    updated = 0
+    with session_scope() as s:
+        for b in billers:
+            sources = sorted({
+                _base_domain(sender) if len(domain_owners[_base_domain(sender)]) == 1 else sender.lstrip("@")
+                for sender in b.senders
+            })
+            ids = gmail_client.search_message_ids(
+                service, f"from:({' OR '.join(sources)}) newer_than:730d {PAYMENT_SETUP_QUERY}"
+            )
+            row = s.get(BillerPayment, b.name)
+            if not ids or (row and row.email_message_id == ids[0]):  # newest first; nothing new
+                continue
+            msg = gmail_client.fetch_message(service, ids[0])
+            if row is None:
+                row = BillerPayment(biller=b.name)
+                s.add(row)
+            row.email_message_id = ids[0]
+            if found := detect_payment(f"{msg.subject}\n{msg.text}"):
+                row.email_method, row.email_detail = found
+                row.email_subject = msg.subject
+                row.email_date = msg.received_at.astimezone(settings.timezone).replace(tzinfo=None)
+                updated += 1
+    return updated
+
+
+def set_payment_method(biller: str, method: str | None, detail: str | None) -> None:
+    """Your own setting for how a biller is paid; method=None goes back to what the emails say."""
+    with session_scope() as s:
+        row = s.get(BillerPayment, biller)
+        if row is None:
+            row = BillerPayment(biller=biller)
+            s.add(row)
+        row.user_method = method
+        row.user_detail = (detail or "").strip() or None if method else None
 
 
 def reparse_all() -> SyncResult:
@@ -227,6 +284,8 @@ def _apply_parse(s: Session, email: BillEmail, biller: Biller) -> str:
     bill.biller = biller.name
     bill.category = biller.category
     bill.currency = biller.currency
+    text = "\n".join([email.subject, email.body_text, email.attachment_text])
+    bill.payment_method, bill.payment_detail = detect_payment(text) or (None, None)
     if bill.status == "manual":
         return bill.status
 
@@ -237,7 +296,6 @@ def _apply_parse(s: Session, email: BillEmail, biller: Biller) -> str:
         bill.parse_notes = "subject didn't match subject_includes/subject_excludes"
         return bill.status
 
-    text = "\n".join([email.subject, email.body_text, email.attachment_text])
     parsed = parse_bill(text, biller)
     bill.amount = parsed.amount
     bill.due_date = parsed.due_date
@@ -248,6 +306,10 @@ def _apply_parse(s: Session, email: BillEmail, biller: Biller) -> str:
         bill.status = "statement" if parsed.statement_notice else "needs_review"
     bill.parse_notes = "; ".join(parsed.notes)
     return bill.status
+
+
+def _base_domain(sender: str) -> str:
+    return ".".join(sender.rsplit("@", 1)[-1].split(".")[-2:])
 
 
 def _bill_month(due_date: date | None, received_at: datetime) -> str:

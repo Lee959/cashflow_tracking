@@ -19,8 +19,19 @@ export interface Attachment {
   filename: string
 }
 
+export type PaymentMethod = 'bank_auto' | 'card_auto' | 'auto' | 'manual'
+
+export interface Payment {
+  method: PaymentMethod
+  detail: string | null
+  source: 'email' | 'you'
+  source_date: string | null
+  source_subject: string | null
+}
+
 export interface Bill {
   id: number
+  payment: Payment | null
   biller: string
   category: string
   amount: number | null
@@ -146,6 +157,11 @@ export const api = {
   dashboard: (month?: string) => request<Dashboard>(`/api/dashboard${month ? `?month=${month}` : ''}`),
   updateBill: (id: number, body: { amount: string | null; due_date: string | null; ignored: boolean }) =>
     request<{ ok: true }>(`/api/bills/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  setPayment: (biller: string, method: PaymentMethod | null, detail: string | null) =>
+    request<{ ok: true; payment: Payment | null }>(`/api/billers/${encodeURIComponent(biller)}/payment`, {
+      method: 'PUT',
+      body: JSON.stringify({ method, detail }),
+    }),
   settings: () => request<Settings>('/api/settings'),
   sync: (body: { months_back?: number; force?: boolean } = {}) => post<SyncRun>('/api/sync', body),
   reparse: () => post<{ summary: string }>('/api/reparse'),

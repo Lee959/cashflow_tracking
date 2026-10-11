@@ -4,9 +4,12 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 
+from sqlalchemy import select
+
 from app.bills import service
 from app.config import settings
-from app.models import Bill
+from app.db import session_scope
+from app.models import Bill, BillEmail, BillerPayment
 
 HISTORY_MONTHS = 12
 
@@ -33,6 +36,7 @@ def month_summary(month: str, on: date | None = None) -> dict:
     statements = [b for b in bills if b.category in service.NOT_IN_TOTALS]
     upcoming = [b for b in counted if b.due_date and b.due_date >= on]
 
+    payments = payment_methods()
     by_category: dict[str, Decimal] = {}
     for b in counted:
         by_category[b.category] = by_category.get(b.category, Decimal(0)) + (b.amount or 0)
@@ -51,14 +55,49 @@ def month_summary(month: str, on: date | None = None) -> dict:
         "total": _sum(counted),
         "count": len(counted),
         "remaining": _sum(upcoming),
-        "next_bill": _bill_json(upcoming[0], on) if upcoming else None,
+        "next_bill": _bill_json(upcoming[0], on, payments) if upcoming else None,
         "history": [{"month": m, "total": float(t)} for m, t in history],
         "categories": [
             {"category": c, "total": float(t)} for c, t in sorted(by_category.items(), key=lambda kv: -kv[1])
         ],
-        "bills": [_bill_json(b, on) for b in counted],
+        "bills": [_bill_json(b, on, payments) for b in counted],
         "statements": {"count": len(statements), "total": _sum(statements)},
         "needs_review": sum(1 for b in bills if b.status == "needs_review"),
+    }
+
+
+def payment_methods() -> dict[str, dict]:
+    """How each biller is paid: your own setting wins; otherwise the most recent email that says,
+    either a bill email ("Automated Payment Withdrawal Date") or a payment-setup confirmation."""
+    found: dict[str, tuple[datetime, dict]] = {}
+    with session_scope() as s:
+        rows = s.execute(
+            select(Bill.biller, Bill.payment_method, Bill.payment_detail, BillEmail.received_at, BillEmail.subject)
+            .join(Bill.email)
+            .where(Bill.payment_method.is_not(None), Bill.status != "ignored")
+            .order_by(BillEmail.received_at)
+        ).all()
+        settings_rows = list(s.scalars(select(BillerPayment)))
+
+    for biller, method, detail, received_at, subject in rows:
+        found[biller] = (received_at, _payment(method, detail, "email", received_at, subject))
+    for p in settings_rows:
+        if p.email_method and (p.biller not in found or p.email_date >= found[p.biller][0]):
+            found[p.biller] = (p.email_date, _payment(p.email_method, p.email_detail, "email", p.email_date, p.email_subject))
+    result = {biller: payment for biller, (_, payment) in found.items()}
+    for p in settings_rows:
+        if p.user_method:
+            result[p.biller] = _payment(p.user_method, p.user_detail, "you", None, None)
+    return result
+
+
+def _payment(method: str, detail: str | None, source: str, when: datetime | None, subject: str | None) -> dict:
+    return {
+        "method": method,
+        "detail": detail,
+        "source": source,
+        "source_date": when.date().isoformat() if when else None,
+        "source_subject": subject,
     }
 
 
@@ -129,8 +168,9 @@ def _sum(bills: list[Bill]) -> float:
     return float(sum((b.amount or 0 for b in bills), Decimal(0)))
 
 
-def _bill_json(b: Bill, on: date) -> dict:
+def _bill_json(b: Bill, on: date, payments: dict[str, dict]) -> dict:
     return {
+        "payment": payments.get(b.biller),
         "id": b.id,
         "biller": b.biller,
         "category": b.category,

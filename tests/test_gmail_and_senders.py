@@ -41,6 +41,8 @@ def test_parse_multipart_message_with_pdf_attachment():
                     "body": {"attachmentId": "a1", "size": 4},
                 },
                 {"mimeType": "image/png", "filename": "logo.png", "body": {"attachmentId": "a2", "size": 4}},
+                # a spoofed "PDF" that is really a web page: dropped
+                {"mimeType": "text/html", "filename": "statement.pdf", "body": {"attachmentId": "a3", "size": 30}},
             ],
         },
     }
@@ -48,7 +50,7 @@ def test_parse_multipart_message_with_pdf_attachment():
 
     def loader(attachment_id):
         loaded.append(attachment_id)
-        return b"%PDF"
+        return b"%PDF-1.7 fake" if attachment_id == "a1" else b"<script>alert(1)</script>"
 
     fetched = parse_message(msg, loader)
     assert fetched.sender_email == "ebills@example-hydro.com"
@@ -57,8 +59,8 @@ def test_parse_multipart_message_with_pdf_attachment():
     assert "Amount due: $88.10" in fetched.text
     assert "Amount due $88.10" in fetched.text  # HTML converted, nbsp normalised
     assert fetched.received_at == datetime.fromtimestamp(1791676800, tz=timezone.utc)
-    assert [a.filename for a in fetched.attachments] == ["bill.pdf"]
-    assert loaded == ["a1"]  # the PNG is never downloaded
+    assert [(a.filename, a.mime_type) for a in fetched.attachments] == [("bill.pdf", "application/pdf")]
+    assert loaded == ["a1", "a3"]  # the PNG is never downloaded; the fake PDF is checked and dropped
 
 
 def test_sender_matching_by_address_and_domain():
