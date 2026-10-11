@@ -1,0 +1,20 @@
+# Web API (the UI is the React app in frontend/)
+fastapi==0.143.0
+uvicorn==0.54.0
+SQLAlchemy==2.1.4
+python-dotenv==1.2.4
+cryptography==50.0.2
+certifi==2026.7.22
+
+# Gmail bills
+google-api-python-client==2.201.0
+google-auth-oauthlib==1.5.0
+beautifulsoup4==4.15.0
+pypdf==6.20.0
+python-dateutil==2.9.0.post0
+
+# Bank data (phase 2)
+plaid-python==45.0.0
+
+# Tests
+pytest==9.1.1

@@ -1,0 +1,14 @@
+# Secrets: never commit
+.env
+secrete/
+
+# Local data: bills, PDFs, database
+data/
+config/bill_senders.toml
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

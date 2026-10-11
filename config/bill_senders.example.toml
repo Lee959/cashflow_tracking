@@ -1,0 +1,37 @@
+# Bill senders: every email from these addresses is treated as a bill.
+# Copy this file to config/bill_senders.toml (git-ignored) and replace the examples
+# with your real senders. Find the exact address by opening a bill in Gmail and
+# clicking the sender name.
+#
+# Fields
+#   name               shown in the app
+#   senders            full addresses, or "@domain.com" for any address at that domain
+#   category           free text: housing, utilities, insurance, phone, internet, credit_card, ...
+#   currency           default "CAD"
+#   subject_includes   optional: only emails whose subject contains one of these count as bills
+#   subject_excludes   optional: skip emails whose subject contains any of these (marketing etc.)
+#   amount_patterns    optional regexes; the first () group is the amount. Tried before the generic rules.
+#   due_date_patterns  optional regexes; the first () group is the due date
+#   dayfirst           true if this biller writes numeric dates as DD/MM/YYYY
+#
+# Tip: after changing patterns, run `python -m app.cli reparse`; no need to re-download from Gmail.
+
+[[biller]]
+name = "Example Hydro"
+senders = ["ebills@example-hydro.com"]
+category = "utilities"
+subject_includes = ["bill", "statement"]
+
+[[biller]]
+name = "Example Home Insurance"
+senders = ["@example-insurance.ca"]
+category = "insurance"
+subject_excludes = ["newsletter", "offer"]
+# amount_patterns = ['Premium amount:\s*\$([\d,]+\.\d{2})']
+# due_date_patterns = ['Withdrawal date:\s*(\w+ \d{1,2}, \d{4})']
+
+[[biller]]
+name = "Example Credit Card"
+senders = ["statements@example-bank.com"]
+category = "credit_card"
+subject_includes = ["statement"]
