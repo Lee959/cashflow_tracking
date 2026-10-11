@@ -43,5 +43,5 @@ function SyncBadge({ sync }: { sync: SyncStatus }) {
         ⚠ Auto-fetch failed
       </Link>
     )
-  return <span className="small muted">Updated {timeAgo(last?.finished_at ?? null)}</span>
+  return <span className="small muted sync-text">Updated {timeAgo(last?.finished_at ?? null)}</span>
 }

@@ -1,10 +1,15 @@
 import { Fragment, useState } from 'react'
-import { api, type Bill } from '../api'
-import { categoryLabel, dayMonth, money } from '../format'
+import { api, type Bill, type PaymentMethod } from '../api'
+import { categoryLabel, dayMonth, money, paymentShort, paymentSource } from '../format'
 
-export function BillsTable({ bills, onChanged }: { bills: Bill[]; onChanged: () => void }) {
-  const [editing, setEditing] = useState<number | null>(null)
+interface Props {
+  bills: Bill[]
+  editing: number | null
+  setEditing: (id: number | null) => void
+  onChanged: () => void
+}
 
+export function BillsTable({ bills, editing, setEditing, onChanged }: Props) {
   if (!bills.length) return <div className="empty">No bills due this month.</div>
 
   return (
@@ -22,13 +27,18 @@ export function BillsTable({ bills, onChanged }: { bills: Bill[]; onChanged: () 
         <tbody>
           {bills.map((b) => (
             <Fragment key={b.id}>
-              <tr>
+              <tr id={`bill-${b.id}`}>
                 <td className="num" style={{ textAlign: 'left', width: 72 }}>
                   {dayMonth(b.due_date)}
                 </td>
                 <td>
                   {b.biller}
-                  <span className="sub">{categoryLabel(b.category)}</span>
+                  <span className="sub">
+                    {categoryLabel(b.category)} ·{' '}
+                    <span title={paymentSource(b.payment)} className={b.payment?.method === 'manual' ? 'warn-text' : undefined}>
+                      {paymentShort(b.payment)}
+                    </span>
+                  </span>
                 </td>
                 <td className="num">{money(b.amount)}</td>
                 <td>
@@ -75,23 +85,39 @@ function StatusChip({ bill }: { bill: Bill }) {
   return null
 }
 
+const METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
+  { value: 'bank_auto', label: 'Auto-debit from a bank account' },
+  { value: 'card_auto', label: 'Auto-charged to a card' },
+  { value: 'auto', label: 'Automatic (other)' },
+  { value: 'manual', label: 'I pay it myself' },
+]
+
 function EditRow({ bill, onDone }: { bill: Bill; onDone: (changed: boolean) => void }) {
+  const ownPayment = bill.payment?.source === 'you' ? bill.payment : null
   const [amount, setAmount] = useState(bill.amount?.toFixed(2) ?? '')
   const [due, setDue] = useState(bill.due_date ?? '')
   const [ignored, setIgnored] = useState(false)
+  const [method, setMethod] = useState<PaymentMethod | ''>(ownPayment?.method ?? '')
+  const [detail, setDetail] = useState(ownPayment?.detail ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const billChanged = amount !== (bill.amount?.toFixed(2) ?? '') || due !== (bill.due_date ?? '') || ignored
+  const paymentChanged = method !== (ownPayment?.method ?? '') || detail !== (ownPayment?.detail ?? '')
 
   async function save() {
     setSaving(true)
     try {
-      await api.updateBill(bill.id, { amount: amount || null, due_date: due || null, ignored })
-      onDone(true)
+      if (billChanged) await api.updateBill(bill.id, { amount: amount || null, due_date: due || null, ignored })
+      if (paymentChanged) await api.setPayment(bill.biller, method || null, method ? detail || null : null)
+      onDone(billChanged || paymentChanged)
     } catch (e) {
       setError((e as Error).message)
       setSaving(false)
     }
   }
+
+  const fromEmail = bill.payment?.source === 'email' ? paymentShort(bill.payment) : 'unknown'
 
   return (
     <tr className="edit-row">
@@ -109,11 +135,34 @@ function EditRow({ bill, onDone }: { bill: Bill; onDone: (changed: boolean) => v
             <input type="checkbox" checked={ignored} onChange={(e) => setIgnored(e.target.checked)} />
             Not a bill
           </label>
+        </div>
+        <div className="row" style={{ marginTop: 10 }}>
+          <label className="row small">
+            Paid by
+            <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod | '')}>
+              <option value="">As the emails say ({fromEmail})</option>
+              {METHOD_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {method && (
+            <input
+              value={detail}
+              onChange={(e) => setDetail(e.target.value)}
+              placeholder="e.g. RBC ••321"
+              size={14}
+              aria-label="Account or card"
+            />
+          )}
+          <span className="small muted">applies to every {bill.biller} bill</span>
           <span style={{ flex: 1 }} />
           <button className="btn quiet" onClick={() => onDone(false)}>
             Cancel
           </button>
-          <button className="btn primary" onClick={save} disabled={saving}>
+          <button className="btn primary" onClick={save} disabled={saving || !(billChanged || paymentChanged)}>
             Save
           </button>
         </div>

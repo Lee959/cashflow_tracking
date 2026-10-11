@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app import google_auth, scheduler
 from app.bills import dashboard, discover, service
+from app.bills.parser import PAYMENT_METHODS
 from app.bills.senders import (
     EXAMPLE_SENDERS,
     Biller,
@@ -49,6 +50,19 @@ def update_bill(bill_id: int, body: BillUpdate):
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     return {"ok": True}
+
+
+class PaymentSetting(BaseModel):
+    method: str | None = None  # None = use what the emails say
+    detail: str | None = None
+
+
+@router.put("/billers/{biller}/payment")
+def set_payment(biller: str, body: PaymentSetting):
+    if body.method is not None and body.method not in PAYMENT_METHODS:
+        raise HTTPException(422, f"method must be one of {', '.join(PAYMENT_METHODS)}")
+    service.set_payment_method(biller, body.method, body.detail)
+    return {"ok": True, "payment": dashboard.payment_methods().get(biller)}
 
 
 @router.get("/settings")

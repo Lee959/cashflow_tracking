@@ -9,14 +9,24 @@
 
 ## 页面
 
-**Dashboard（`/`）**：只看最重要的信息
+**Dashboard（`/`）**：按重要程度从上往下排
 
-1. **Your fixed bills**：每月固定账单总额（以及一年合计），按账单列出每月平均。
-   两个月一次的水费、一年两次的地税，都折算成每月金额。算法：最近 12 个月里每个账单的总额 ÷ 覆盖的月数。
-2. **本月卡片**：本月到期总额、还剩多少要付、下一笔是什么和哪天，以及跟每月平均相比高还是低。
-   可以往前翻月份，但**不会显示未来月份**。
+1. **这个月花了多少**（最大的数字）：本月已经付出去的账单金额（到期日已过的），进度条显示占本月到期总额的多少。
+   右边是**还要付多少**、下一笔是什么、哪天、**用什么方式付**，以及本月总额比平常的月份多还是少。
+   可以往前翻月份（看过去的月份时显示那个月一共花了多少），但**不会显示未来月份**。
+2. **当月账单列表**：每笔账单的到期日、金额、付款方式，可以手动修改，有 PDF 的可以直接打开。
 3. **Bills by month**：最近 12 个月的柱状图，悬停看金额，点柱子跳到那个月。
-4. **当月账单列表**：可以手动修改金额或到期日，有 PDF 的可以直接打开。
+4. **Your usual month**：平常每个月的固定账单（月平均），按账单列出。
+   两个月一次的水费、一年两次的地税，都折算成每月金额。算法：最近 12 个月里每个账单的总额 ÷ 覆盖的月数。
+
+目前只统计 Gmail 里找到的账单；刷卡和银行账户里的其他支出要等接入 Plaid 后才能算进来。
+
+**付款方式**（自动从银行扣款、自动从卡扣款、自己手动付）从邮件里自动识别：
+- 账单邮件本身，比如 Hydro 的 "Automated Payment Withdrawal Date"、水费的 "registered with pre-authorized debit"
+- 同一家公司的付款设置确认邮件，比如 Bell 的 "Confirmation - Change pre-authorized payments"，会读出银行或卡的名称和尾号（如 RBC ••321）
+
+以最近的一封为准。每次自动抓取时会顺便检查有没有新的设置邮件。邮件里没写的（比如地税），可以在账单的 Edit 里设置 "Paid by"，手动设置优先于邮件。
+悬停在付款方式上，可以看到它来自哪封邮件。
 
 信用卡月结单**不计入总额**：卡上的消费以后从银行交易来，避免和用卡支付的账单重复计算。
 
@@ -37,7 +47,7 @@
 
 3. **Google OAuth 同意屏幕**（Google Cloud Console → Google Auth Platform）
    - 确认 Gmail API 已启用。
-   - Publishing status 是 **Testing** 时：要把用来收账单的 Gmail（`you@example.com`）加进 *Audience → Test users*，否则登录会被拦截（错误 403 access_denied）。
+   - Publishing status 是 **Testing** 时：要把用来收账单的那个 Gmail 地址加进 *Audience → Test users*，否则登录会被拦截（错误 403 access_denied）。
      Testing 模式下授权 **7 天就会过期**，到时在 Settings 里重新点 Connect Gmail。
    - 想免去每周重新授权：点 **Publish app** 改为 In production，不需要提交审核。
      登录时会看到 "Google hasn't verified this app"，点 *Advanced → Go to …* 继续即可（最多 100 个用户，家庭使用足够）。
@@ -102,7 +112,7 @@ Google 登录完成后会跳回 :8000（回调地址固定在那里），这是�
 | Ottawa 地税 | ✅ Gmail，一年两次 |
 | Bell 网络 | ✅ Gmail，每月 |
 | Enbridge 煤气、Reliance 热水器、My Ontario account、Anytime Fitness | ❌ 这个 Gmail 里没有账单邮件 |
-| Rogers Business Mobile | ❌ 账单可能发到 家里另一个人的邮箱 |
+| Rogers Business Mobile | ❌ 账单可能发到家里另一个人的邮箱 |
 
 补上这几项的办法：
 - **Enbridge**：在 Enbridge My Account → My Bill Options 开通 **eBill 并附 PDF**，账单就会进 Gmail，程序能直接解析。

@@ -12,11 +12,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import google_auth, scheduler
+from app import google_auth, scheduler, security
 from app.api import router as api_router
 from app.bills import service
 from app.config import PROJECT_ROOT, settings
 from app.db import init_db
+from app.gmail_client import is_pdf_data
 
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 
@@ -32,6 +33,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Cashflow Tracker", lifespan=lifespan)
+security.install(app)
 app.include_router(api_router)
 
 
@@ -66,8 +68,14 @@ def download_attachment(attachment_id: int):
     path = (settings.data_dir / attachment.path).resolve()
     if not path.is_relative_to(settings.data_dir.resolve()) or not path.exists():
         raise HTTPException(404)
-    return FileResponse(path, media_type=attachment.mime_type, filename=attachment.filename,
-                        content_disposition_type="inline")
+    # Only real PDFs, always served as PDFs: a spoofed email's "bill.pdf" declared as text/html
+    # must never render as a page on this app's origin.
+    with path.open("rb") as f:
+        if not is_pdf_data(f.read(1024)):
+            raise HTTPException(404)
+    return FileResponse(path, media_type="application/pdf", filename=attachment.filename,
+                        content_disposition_type="inline",
+                        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
 
 # React app: static assets, and index.html for every other path (client-side routes like /settings)

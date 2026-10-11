@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { api, type Dashboard as DashboardData } from '../api'
+import { api, type Bill, type Dashboard as DashboardData } from '../api'
 import { BillsTable } from '../components/BillsTable'
 import { FixedCosts } from '../components/FixedCosts'
 import { MonthlyChart } from '../components/MonthlyChart'
 import { TopBar } from '../components/TopBar'
-import { dayMonth, localDate, money, moneyWhole, monthLong, monthName } from '../format'
+import { dayMonth, localDate, money, moneyWhole, monthLong, monthName, paymentLabel, paymentSource } from '../format'
 
 export function Dashboard() {
   const [params, setParams] = useSearchParams()
@@ -13,6 +13,7 @@ export function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loadedFor, setLoadedFor] = useState<string | undefined | null>(null)
   const [error, setError] = useState('')
+  const [editing, setEditing] = useState<number | null>(null)
 
   const load = useCallback(() => {
     api.dashboard(month).then(
@@ -34,51 +35,56 @@ export function Dashboard() {
 
   const go = (m: string) => setParams(m === data?.current_month ? {} : { month: m })
 
+  // "Set it" on the next payment opens that bill's edit row in the list below
+  const editBill = (id: number) => {
+    setEditing(id)
+    requestAnimationFrame(() => document.getElementById(`bill-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  }
+
   return (
     <div className="page">
       <TopBar sync={data?.sync} />
       {error && <div className="notice glass error">{error}</div>}
       {data && (
-        <main>
-          <FixedCosts fixed={data.fixed} />
+        <main style={{ opacity: loadedFor === month ? 1 : 0.6, transition: 'opacity 0.15s' }}>
+          <MonthHero data={data} go={go} editBill={editBill} />
 
-          <div style={{ opacity: loadedFor === month ? 1 : 0.6, transition: 'opacity 0.15s' }}>
-            <section className="grid two">
-              <MonthCard data={data} go={go} />
-              <div className="card glass">
-                <h2>Bills by month</h2>
-                <MonthlyChart history={data.history} selected={data.month} onSelect={go} />
-              </div>
-            </section>
-
-            <section className="card glass" style={{ marginTop: 16 }}>
-              <div className="card-head">
-                <h2>{monthName(data.month)} bills</h2>
-                {data.needs_review > 0 && (
-                  <span className="chip warn">
-                    ⚠ {data.needs_review} {data.needs_review === 1 ? 'needs' : 'need'} an amount
-                  </span>
-                )}
-              </div>
-              <BillsTable bills={data.bills} onChanged={load} />
-              {data.statements.count > 0 && (
-                <p className="small muted" style={{ margin: '12px 0 0' }}>
-                  + {data.statements.count} card statement{data.statements.count > 1 ? 's' : ''} (
-                  {money(data.statements.total)}) not counted: that spending comes from the bank.
-                </p>
+          <section className="card glass" style={{ marginTop: 16 }}>
+            <div className="card-head">
+              <h2>{monthName(data.month)} bills</h2>
+              {data.needs_review > 0 && (
+                <span className="chip warn">
+                  ⚠ {data.needs_review} {data.needs_review === 1 ? 'needs' : 'need'} an amount
+                </span>
               )}
-            </section>
-          </div>
+            </div>
+            <BillsTable bills={data.bills} editing={editing} setEditing={setEditing} onChanged={load} />
+            {data.statements.count > 0 && (
+              <p className="small muted" style={{ margin: '12px 0 0' }}>
+                + {data.statements.count} card statement{data.statements.count > 1 ? 's' : ''} (
+                {money(data.statements.total)}) not counted: that spending comes from the bank.
+              </p>
+            )}
+          </section>
+
+          <section className="grid two">
+            <div className="card glass">
+              <h2>Bills by month</h2>
+              <MonthlyChart history={data.history} selected={data.month} onSelect={go} />
+            </div>
+            <FixedCosts fixed={data.fixed} />
+          </section>
         </main>
       )}
     </div>
   )
 }
 
-/** The selected month: what's due, what's left, and how it compares with the fixed monthly cost. */
-function MonthCard({ data, go }: { data: DashboardData; go: (m: string) => void }) {
+/** The headline: how much went out on bills in the selected month, and what's still coming. */
+function MonthHero({ data, go, editBill }: { data: DashboardData; go: (m: string) => void; editBill: (id: number) => void }) {
   const isCurrent = data.month === data.current_month
-  const paid = data.total - data.remaining
+  const spent = data.total - data.remaining
+  const [dollars, cents] = money(spent).split('.')
   const usual = data.fixed?.monthly
   const diff = usual ? data.total - usual : null
   const daysUntil = data.next_bill?.due_date
@@ -86,68 +92,94 @@ function MonthCard({ data, go }: { data: DashboardData; go: (m: string) => void 
     : null
 
   return (
-    <div className="card glass month-card">
-      <div className="card-head">
-        <h2 className="month-title">{monthLong(data.month)}</h2>
-        <div className="row" style={{ gap: 6 }}>
-          {!isCurrent && (
-            <button className="btn small" onClick={() => go(data.current_month)}>
-              This month
+    <section className="hero-panel glass month-hero" aria-label={`Spending in ${monthLong(data.month)}`}>
+      <div className="hero-main">
+        <div className="row spread">
+          <div className="eyebrow">Spent on bills · {monthLong(data.month)}</div>
+          <div className="row" style={{ gap: 6 }}>
+            {!isCurrent && (
+              <button className="btn small" onClick={() => go(data.current_month)}>
+                This month
+              </button>
+            )}
+            <button className="btn icon" aria-label="Previous month" onClick={() => go(data.prev_month)}>
+              ‹
             </button>
-          )}
-          <button className="btn icon" aria-label="Previous month" onClick={() => go(data.prev_month)}>
-            ‹
-          </button>
-          <button
-            className="btn icon"
-            aria-label="Next month"
-            disabled={!data.next_month}
-            onClick={() => data.next_month && go(data.next_month)}
-          >
-            ›
-          </button>
-        </div>
-      </div>
-
-      <div className="split">
-        <div>
-          <div className="label">Bills due</div>
-          <div className="tile-value">{money(data.total)}</div>
-          <div className="small muted">
-            {data.count} {data.count === 1 ? 'bill' : 'bills'}
+            <button
+              className="btn icon"
+              aria-label="Next month"
+              disabled={!data.next_month}
+              onClick={() => data.next_month && go(data.next_month)}
+            >
+              ›
+            </button>
           </div>
         </div>
+        <div className="hero-figure">
+          {dollars}
+          <span className="cents">.{cents}</span>
+        </div>
+        <div className="hero-sub">
+          {isCurrent ? 'so far this month' : `in ${monthName(data.month)}`}
+          {data.total > 0 && data.remaining > 0 && <> · of {money(data.total)} due</>}
+        </div>
+        {data.total > 0 && (
+          <div className="progress hero-progress" title="Bills whose due date has passed" aria-hidden>
+            <div style={{ width: `${(spent / data.total) * 100}%` }} />
+          </div>
+        )}
+        <p className="small muted hero-note">
+          {data.count} {data.count === 1 ? 'bill' : 'bills'} found in Gmail. Card and bank spending will be added once
+          the bank connection (Plaid) is set up.
+        </p>
+      </div>
+
+      <div className="hero-side">
         <div>
-          <div className="label">Still to pay</div>
+          <div className="label">Still to come</div>
           <div className="tile-value">{data.remaining > 0 ? money(data.remaining) : 'Nothing'}</div>
           <div className="small muted">
             {data.next_bill
               ? `Next: ${data.next_bill.biller}, ${dayMonth(data.next_bill.due_date)}${
                   daysUntil === 0 ? ' (today)' : daysUntil === 1 ? ' (tomorrow)' : daysUntil ? ` (in ${daysUntil} days)` : ''
-                }`
+                } · ${money(data.next_bill.amount)}`
               : isCurrent
                 ? 'No more bills due this month'
-                : 'All due dates have passed'}
+                : 'Every bill in this month is past its due date'}
           </div>
+          {data.next_bill && <PaymentLine bill={data.next_bill} editBill={editBill} />}
         </div>
-      </div>
 
-      {data.total > 0 && (
-        <>
-          <div className="progress" title="Bills whose due date has passed" aria-hidden>
-            <div style={{ width: `${(paid / data.total) * 100}%` }} />
+        {diff !== null && usual && data.total > 0 && (
+          <div className="hero-compare">
+            <div className="label">Compared with a usual month</div>
+            <div className="small">
+              {monthName(data.month)} bills total {money(data.total)}:{' '}
+              <strong>
+                {diff <= 0 ? '▼' : '▲'} {moneyWhole(Math.abs(diff))} {diff <= 0 ? 'less' : 'more'}
+              </strong>{' '}
+              than your {moneyWhole(usual)} average
+            </div>
           </div>
-          <div className="small muted">
-            {money(paid)} of {money(data.total)} already paid
-            {diff !== null && usual && (
-              <>
-                {' · '}
-                {diff <= 0 ? '▼' : '▲'} {moneyWhole(Math.abs(diff))} {diff <= 0 ? 'below' : 'above'} your{' '}
-                {moneyWhole(usual)} monthly average
-              </>
-            )}
-          </div>
-        </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/** How the next payment will be made. "You pay this yourself" stands out: it needs action. */
+function PaymentLine({ bill, editBill }: { bill: Bill; editBill: (id: number) => void }) {
+  const p = bill.payment
+  const icon = !p ? '?' : p.method === 'card_auto' ? '💳' : p.method === 'manual' ? '✋' : '🏦'
+  return (
+    <div className="payment-line">
+      <span className={`chip ${!p ? '' : p.method === 'manual' ? 'warn' : 'accent'}`} title={paymentSource(p)}>
+        <span aria-hidden>{icon}</span> {paymentLabel(p)}
+      </span>
+      {!p && (
+        <button className="btn quiet small" onClick={() => editBill(bill.id)}>
+          Set it
+        </button>
       )}
     </div>
   )

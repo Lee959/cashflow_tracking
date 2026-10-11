@@ -77,12 +77,63 @@ STATEMENT_NOTICE_RE = re.compile(
 )
 
 
+# Payment methods (see detect_payment)
+BANK_AUTO, CARD_AUTO, AUTO, MANUAL = "bank_auto", "card_auto", "auto", "manual"
+PAYMENT_METHODS = (BANK_AUTO, CARD_AUTO, AUTO, MANUAL)
+
+_AUTO_PAYMENT = re.compile(
+    r"pre-?authori[sz]ed|automated payment|automatically (?:withdrawn|debited|charged)|"
+    r"automatic (?:payment|withdrawal|debit)|auto-?pay",
+    re.I,
+)
+_WITHDRAWAL = re.compile(r"withdraw|debit", re.I)
+_BANK_NAME = re.compile(r"bank name\s*:?\s*(.{2,40}?)\s+(?:transit|branch|institution|bank account|account number)", re.I)
+_BANK_ACCOUNT = re.compile(r"account (?:number|no\.?|#)\s*:?\s*[*x•·\s-]*(\d{2,4})\b", re.I)
+_CARD = re.compile(
+    r"\b(visa|master ?card|amex|american express)\b.{0,40}?(?:card number|number|ending(?: in| with)?)"
+    r"\s*:?\s*[*x•·\s-]*(\d{4})\b",
+    re.I | re.S,
+)
+_CARD_NAMES = {"visa": "Visa", "mastercard": "Mastercard", "master card": "Mastercard", "amex": "Amex",
+               "american express": "Amex"}
+_BANK_NAMES = [("royal bank", "RBC"), ("rbc", "RBC"), ("toronto-dominion", "TD"), ("td ", "TD"),
+               ("cibc", "CIBC"), ("imperial bank", "CIBC"), ("scotia", "Scotiabank"), ("bmo", "BMO"),
+               ("bank of montreal", "BMO"), ("tangerine", "Tangerine"), ("desjardins", "Desjardins"),
+               ("national bank", "National Bank"), ("simplii", "Simplii"), ("eq bank", "EQ Bank")]
+
+
 @dataclass
 class ParseResult:
     amount: Decimal | None = None
     due_date: date | None = None
     statement_notice: bool = False  # no amount, but it's a "statement is ready" email
+    payment: tuple[str, str | None] | None = None  # (method, detail), e.g. ("bank_auto", "RBC ••321")
     notes: list[str] = field(default_factory=list)
+
+
+def detect_payment(text: str) -> tuple[str, str | None] | None:
+    """Automatic payment set up for this bill, if the text says so.
+
+    Bill emails ("Automated Payment Withdrawal Date", "registered with pre-authorized debit")
+    and payment-setup emails ("Bank Name RBC ROYAL BANK ... Bank account number ****321",
+    "Card type Visa Card number ****4242"). Returns (method, detail) or None.
+    """
+    if not _AUTO_PAYMENT.search(text):
+        return None
+    if bank := _BANK_NAME.search(text):
+        account = _BANK_ACCOUNT.search(text, bank.end(), bank.end() + 160)
+        name = _short_bank_name(bank.group(1))
+        return BANK_AUTO, f"{name} ••{account.group(1)}" if account else name
+    if card := _CARD.search(text):
+        return CARD_AUTO, f"{_CARD_NAMES[card.group(1).lower()]} ••{card.group(2)}"
+    if _WITHDRAWAL.search(text):
+        return BANK_AUTO, None
+    return AUTO, None
+
+
+def _short_bank_name(raw: str) -> str:
+    lower = raw.lower() + " "
+    return next((short for key, short in _BANK_NAMES if key in lower), raw.strip().title())
 
 
 def parse_bill(text: str, biller: Biller) -> ParseResult:
@@ -96,6 +147,8 @@ def parse_bill(text: str, biller: Biller) -> ParseResult:
     result.due_date = _date_from_patterns(text, biller.due_date_patterns, biller.dayfirst, result.notes)
     if result.due_date is None:
         result.due_date = _date_after_keyword(text, biller.dayfirst, result.notes)
+
+    result.payment = detect_payment(text)
 
     if result.amount is None:
         result.statement_notice = bool(STATEMENT_NOTICE_RE.search(text))

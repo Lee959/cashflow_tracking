@@ -50,6 +50,10 @@ def run_sync(trigger: str, months: list[str] | None = None, force: bool = False)
             results = [service.sync_month(m, force=force) for m in months]
             run.ok = True
             run.summary = _summarize(months, results)
+            try:
+                service.refresh_payment_methods()
+            except Exception:  # payment methods are a nice-to-have; never fail the fetch over them
+                log.exception("Checking payment-setup emails failed")
         except (google_auth.GmailNotConnected, BillerConfigError) as exc:
             run.summary = str(exc)
         except HttpError as exc:
