@@ -12,12 +12,15 @@
 **Dashboard（`/`）**：按重要程度从上往下排
 
 1. **这个月花了多少**（最大的数字）：本月已经付出去的账单金额（到期日已过的），进度条显示占本月到期总额的多少。
-   右边是**还要付多少**、下一笔是什么、哪天、**用什么方式付**，以及本月总额比平常的月份多还是少。
+   右边是**还要付多少**、下一笔是什么、哪天、**用什么方式付**，以及本月总额比平常的月份多还是少
+   （只和邮件账单的平均比，因为手动录入的支出不会出现在当月账单里）。
    可以往前翻月份（看过去的月份时显示那个月一共花了多少），但**不会显示未来月份**。
 2. **当月账单列表**：每笔账单的到期日、金额、付款方式，可以手动修改，有 PDF 的可以直接打开。
 3. **Bills by month**：最近 12 个月的柱状图，悬停看金额，点柱子跳到那个月。
 4. **Your usual month**：平常每个月的固定账单（月平均），按账单列出。
    两个月一次的水费、一年两次的地税，都折算成每月金额。算法：最近 12 个月里每个账单的总额 ÷ 覆盖的月数。
+   在 Settings 手动录入的固定支出（没有账单邮件的，比如 Enbridge、健身房）也算在里面，按频率折算成每月金额
+   （例如一年 $120 = 每月 $10），列表里标注 *entered by hand*。
 
 目前只统计 Gmail 里找到的账单；刷卡和银行账户里的其他支出要等接入 Plaid 后才能算进来。
 
@@ -30,7 +33,9 @@
 
 信用卡月结单**不计入总额**：卡上的消费以后从银行交易来，避免和用卡支付的账单重复计算。
 
-**Settings（`/settings`）**：Gmail 连接、自动抓取状态和手动抓取、账单发件人管理、最近抓取记录。
+**Settings（`/settings`）**：Gmail 连接、自动抓取状态和手动抓取、账单发件人管理、最近抓取记录，
+以及 **Fixed costs without emails**：手动录入不发账单邮件的固定支出（名称、金额、频率：每月 / 每两个月 / 每季度 /
+一年两次 / 每年，可选扣款日或下次到期日，类别）。可以修改、暂停（不计入总额）或删除。
 **Find bill senders（`/settings/senders`）**：扫描 Gmail，勾选真正的账单发件人。
 
 ## 首次设置
@@ -111,15 +116,18 @@ Google 登录完成后会跳回 :8000（回调地址固定在那里），这是�
 | Ottawa 水费 | ✅ Gmail，每两个月 |
 | Ottawa 地税 | ✅ Gmail，一年两次 |
 | Bell 网络 | ✅ Gmail，每月 |
-| Enbridge 煤气、Reliance 热水器、My Ontario account、Anytime Fitness | ❌ 这个 Gmail 里没有账单邮件 |
-| Rogers Business Mobile | ❌ 账单可能发到家里另一个人的邮箱 |
+| Enbridge 煤气、Reliance 热水器、My Ontario account、Anytime Fitness | ✍️ 这个 Gmail 里没有账单邮件，在 Settings 手动录入 |
+| Rogers Business Mobile | ✍️ 账单可能发到家里另一个人的邮箱，在 Settings 手动录入 |
 
-补上这几项的办法：
+现在就能补上：Settings → **Fixed costs without emails** → **Add**，填金额和频率，Dashboard 的总额马上就会包含。
+以后某一项改成邮件账单（比如 Enbridge 开通了 eBill），记得把手动那条暂停或删除，否则会重复计算。
+
+改成自动的办法：
 - **Enbridge**：在 Enbridge My Account → My Bill Options 开通 **eBill 并附 PDF**，账单就会进 Gmail，程序能直接解析。
   My Account → Share My Data 还可以下载 24 个月的 Green Button XML 历史数据。
 - **Reliance**：在安大略常常合并在 Enbridge 账单里，先看一下 Enbridge 账单上有没有。
 - **Rogers**：转发到这个 Gmail，或以后支持连接第二个 Gmail。
-- **其余几项**：等接入 Plaid 的银行交易，或者手动录入。
+- **其余几项**：先手动录入，以后用 Plaid 的银行交易核对。
 
 ## 命令行
 
@@ -140,7 +148,7 @@ cd frontend && npm run lint && npm run build             # 前端检查和构建
 ```
 app/                      后端（Python）
   main.py                 FastAPI 入口：Google 登录、PDF 附件、托管前端构建产物
-  api.py                  JSON API（/api/dashboard、/api/settings、/api/sync …）
+  api.py                  JSON API（/api/dashboard、/api/settings、/api/sync、/api/manual-costs …）
   scheduler.py            后台自动抓取 + 抓取记录
   cli.py                  命令行
   config.py               读取 .env
@@ -151,12 +159,13 @@ app/                      后端（Python）
     parser.py             金额和到期日提取
     service.py            按月同步、重新解析、查询
     dashboard.py          Dashboard 数据：固定支出、当月汇总、12 个月趋势
+    manual.py             手动录入的固定支出（没有账单邮件的）
     discover.py           Find bill senders 的扫描和分类
   plaid_client.py         Plaid（目前只有连接测试）
   models.py               数据表（SQLite）
 frontend/                 前端（React + TypeScript + Vite）
   src/pages/              Dashboard、Settings、FindSenders
-  src/components/         FixedCosts、MonthlyChart、BillsTable、TopBar
+  src/components/         FixedCosts、ManualCosts、MonthlyChart、BillsTable、TopBar
   src/styles.css          liquid glass 样式（浅色和深色模式）
 config/bill_senders.example.toml
 tests/                    后端测试（pytest）
@@ -178,7 +187,7 @@ tests/                    后端测试（pytest）
 ## 下一步
 
 - [ ] Enbridge 开通 eBill 附 PDF；Rogers 账单转发到这个 Gmail
-- [ ] 手动录入没有账单邮件的固定支出（Anytime Fitness、My Ontario 等）
+- [x] 手动录入没有账单邮件的固定支出（Settings → Fixed costs without emails）
 - [ ] Green Button XML 导入（补齐 Enbridge 和 Hydro 的历史数据）
 - [ ] 开机自动启动服务（macOS launchd），这样电脑开着就能一直自动抓取
 - [ ] Plaid Link 接入 → 交易同步，用来核对账单是否真的扣款，并补上不发邮件的扣款

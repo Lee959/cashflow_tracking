@@ -85,7 +85,8 @@ function MonthHero({ data, go, editBill }: { data: DashboardData; go: (m: string
   const isCurrent = data.month === data.current_month
   const spent = data.total - data.remaining
   const [dollars, cents] = money(spent).split('.')
-  const usual = data.fixed?.monthly
+  // a month's bills only come from email, so compare with the emailed part of the fixed bills
+  const usual = data.fixed?.items.filter((i) => i.source === 'email').reduce((sum, i) => sum + i.monthly, 0)
   const diff = usual ? data.total - usual : null
   const daysUntil = data.next_bill?.due_date
     ? Math.round((localDate(data.next_bill.due_date).getTime() - localDate(data.today).getTime()) / 86_400_000)
@@ -158,7 +159,7 @@ function MonthHero({ data, go, editBill }: { data: DashboardData; go: (m: string
               <strong>
                 {diff <= 0 ? '▼' : '▲'} {moneyWhole(Math.abs(diff))} {diff <= 0 ? 'less' : 'more'}
               </strong>{' '}
-              than your {moneyWhole(usual)} average
+              than these bills usually come to ({moneyWhole(usual)} a month)
             </div>
           </div>
         )}

@@ -869,6 +869,46 @@ tr.faded {
   margin: 0;
 }
 
+/* fixed costs without emails: the add/edit form */
+.mc-form {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.mc-form + .hbar-row {
+  margin-top: 14px;
+}
+
+.mc-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px 12px;
+}
+
+.mc-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mc-fields label > span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.mc-fields input,
+.mc-fields select {
+  width: 100%;
+}
+
+.mc-fields .mc-wide {
+  grid-column: 1 / -1;
+}
+
 details > summary {
   cursor: pointer;
   color: var(--ink-2);
