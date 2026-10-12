@@ -203,6 +203,52 @@ export interface PlaidSyncResult {
   removed: number
 }
 
+export interface NetWorthGroup {
+  group: string
+  label: string
+  is_debt: boolean
+  /** for debts, the amount owed */
+  total: number
+  items: { name: string; balance: number; manual: boolean }[]
+}
+
+/** What you own minus what you owe (app/networth.py). null until a bank or manual item exists. */
+export interface NetWorth {
+  as_of: string
+  net: number
+  assets: number
+  debts: number
+  change_30d: number | null
+  since: string | null
+  groups: NetWorthGroup[]
+  history: { date: string; net: number }[]
+  is_test_data: boolean
+}
+
+export type AssetKind = 'asset' | 'debt'
+
+export interface ManualAsset {
+  id: number
+  name: string
+  kind: AssetKind
+  category: string
+  value: number
+  updated_at: string | null
+}
+
+export interface ManualAssetList {
+  items: ManualAsset[]
+  categories: Record<AssetKind, string[]>
+  labels: Record<string, string>
+}
+
+export interface ManualAssetInput {
+  name: string
+  kind: AssetKind
+  category: string
+  value: string
+}
+
 export interface Candidate {
   email: string
   domain: string
@@ -307,4 +353,10 @@ export const api = {
   updateManualCost: (id: number, body: ManualCostInput) =>
     request<ManualCost>(`/api/manual-costs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteManualCost: (id: number) => request<{ ok: true }>(`/api/manual-costs/${id}`, { method: 'DELETE' }),
+  networth: () => request<NetWorth | null>('/api/networth'),
+  assets: () => request<ManualAssetList>('/api/assets'),
+  addAsset: (body: ManualAssetInput) => post<{ id: number }>('/api/assets', body),
+  updateAsset: (id: number, body: ManualAssetInput) =>
+    request<{ ok: true }>(`/api/assets/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteAsset: (id: number) => request<{ ok: true }>(`/api/assets/${id}`, { method: 'DELETE' }),
 }

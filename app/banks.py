@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from sqlalchemy import delete, func, select
 
-from app import plaid_client
+from app import networth, plaid_client
 from app.config import settings
 from app.crypto import decrypt, encrypt
 from app.db import session_scope
@@ -106,6 +106,7 @@ def sync_item(item_id: str) -> dict:
         item.transactions_cursor = next_cursor
         item.last_synced_at = datetime.now()
         item.last_error = item.last_error_code = None
+    networth.take_snapshot()  # today's balances feed the net worth history
     return {"item_id": item_id, "accounts": len(accounts), "added": len(added), "modified": len(modified),
             "removed": len(removed)}
 
@@ -163,6 +164,7 @@ def remove(item_id: str) -> None:
         s.execute(delete(PlaidTransaction).where(PlaidTransaction.item_id == item_id))
         s.execute(delete(PlaidAccount).where(PlaidAccount.item_id == item_id))
         s.execute(delete(PlaidItem).where(PlaidItem.item_id == item_id))
+    networth.take_snapshot()  # drop its accounts from today's net worth (past days stay as they were)
 
 
 def _same_login_already_connected(institution_id: str | None, accounts: list[dict]) -> str | None:

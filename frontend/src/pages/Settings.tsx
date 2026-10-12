@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router'
 import { api, type Settings as SettingsData } from '../api'
 import { BankAccounts } from '../components/BankAccounts'
 import { ManualCosts } from '../components/ManualCosts'
+import { OtherAssets } from '../components/OtherAssets'
 import { TopBar } from '../components/TopBar'
 import { categoryLabel, dateTime, timeAgo } from '../format'
 
@@ -177,6 +178,8 @@ export function Settings() {
 
           <div className="stack">
             <BankAccounts />
+
+            <OtherAssets />
 
             <section className="card glass">
               <div className="card-head">

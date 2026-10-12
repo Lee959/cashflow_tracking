@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from googleapiclient.errors import HttpError
 from sqlalchemy import select
 
-from app import banks, google_auth
+from app import banks, google_auth, networth
 from app.bills import service
 from app.bills.senders import BillerConfigError
 from app.db import session_scope
@@ -58,6 +58,10 @@ def run_sync(trigger: str, months: list[str] | None = None, force: bool = False)
             banks_ok, summary = _fetch_banks()
             ok &= banks_ok
             parts.append(summary)
+        try:
+            networth.take_snapshot()  # a point for today even when only hand-entered items exist
+        except Exception:
+            log.exception("Net worth snapshot failed")
         run.ok = ok
         run.summary = " · ".join(parts)
         run.finished_at = datetime.now()

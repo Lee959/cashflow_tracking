@@ -221,3 +221,31 @@ class Passkey(Base):
     sign_count: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
     last_used_at: Mapped[datetime | None]
+
+
+class ManualAsset(Base):
+    """Something you own or owe that no bank connection reports: the house, a car, a loan elsewhere."""
+
+    __tablename__ = "manual_assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(8))  # asset / debt
+    category: Mapped[str] = mapped_column(String(32))  # see app/networth.py MANUAL_CATEGORIES
+    value: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.now, onupdate=datetime.now)
+
+
+class BalanceSnapshot(Base):
+    """One account's (or manual item's) balance on one day. Plaid doesn't provide past balances,
+    so net worth history is built from these, one row per source per day (the day's latest)."""
+
+    __tablename__ = "balance_snapshots"
+
+    snapshot_date: Mapped[date] = mapped_column(primary_key=True)
+    source_id: Mapped[str] = mapped_column(String(80), primary_key=True)  # Plaid account_id or "manual-<id>"
+    name: Mapped[str] = mapped_column(String(255))
+    group: Mapped[str] = mapped_column(String(32))  # cash / investments / property / credit_cards / loans ...
+    is_debt: Mapped[bool]
+    balance: Mapped[Decimal] = mapped_column(Numeric(14, 2))  # as reported; for debts, the amount owed
+    environment: Mapped[str] = mapped_column(String(16))  # sandbox / production / manual

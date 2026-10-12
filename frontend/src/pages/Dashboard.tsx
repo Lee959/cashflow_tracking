@@ -5,6 +5,7 @@ import { BankSpending } from '../components/BankSpending'
 import { BillsTable } from '../components/BillsTable'
 import { FixedCosts } from '../components/FixedCosts'
 import { MonthlyChart } from '../components/MonthlyChart'
+import { NetWorthCard } from '../components/NetWorthCard'
 import { TopBar } from '../components/TopBar'
 import { dayMonth, localDate, money, moneyWhole, monthLong, monthName, paymentLabel, paymentSource } from '../format'
 
@@ -69,6 +70,8 @@ export function Dashboard() {
           </section>
 
           {data.bank && <BankSpending bank={data.bank} month={data.month} />}
+
+          <NetWorthCard />
 
           <section className="grid two">
             <div className="card glass">

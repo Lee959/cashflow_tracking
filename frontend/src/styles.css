@@ -30,6 +30,8 @@
   --danger-soft: rgba(239, 68, 68, 0.14);
   --ok: #047857;
   --ok-soft: rgba(16, 185, 129, 0.14);
+  --debt: #64748b;
+  --surface: #f8fafc;
 
   --radius: 24px;
   --radius-sm: 14px;
@@ -68,6 +70,8 @@
     --danger-soft: rgba(248, 113, 113, 0.14);
     --ok: #6ee7b7;
     --ok-soft: rgba(110, 231, 183, 0.12);
+    --debt: #94a3b8;
+    --surface: #1a202b;
   }
 }
 
@@ -1027,4 +1031,198 @@ details > summary {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ---------- net worth ---------- */
+
+.nw-top {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 32px;
+  align-items: center;
+}
+
+@media (max-width: 860px) {
+  .nw-top {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+
+.nw-figure {
+  font-size: clamp(36px, 5vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.nw-change {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.nw-change.up {
+  color: var(--ok);
+}
+
+.nw-change.down {
+  color: var(--danger);
+}
+
+.nw-change .muted {
+  font-weight: 500;
+}
+
+.nw-totals {
+  display: flex;
+  gap: 28px;
+  margin: 18px 0 0;
+}
+
+.nw-totals dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.nw-totals dd {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.nw-parts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+@media (max-width: 640px) {
+  .nw-parts {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+
+.nw-groups {
+  margin-top: 10px;
+}
+
+.fc-bar.debt > div {
+  background: var(--debt);
+}
+
+.nw-items {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.nw-items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.nw-items .num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- line chart ---------- */
+
+.linechart {
+  position: relative;
+  padding-left: 48px;
+}
+
+.linechart .plot {
+  position: relative;
+  height: 170px;
+  border-radius: 6px;
+  touch-action: pan-y;
+}
+
+.linechart .plot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+}
+
+.linechart .gridline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.linechart .gridline.zero {
+  border-top-color: color-mix(in srgb, var(--ink) 30%, transparent);
+}
+
+.linechart .gridline span {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: -8px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.linechart svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.linechart .line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.linechart .wash {
+  fill: var(--accent);
+  opacity: 0.1;
+}
+
+.linechart .crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid color-mix(in srgb, var(--ink) 35%, transparent);
+  pointer-events: none;
+}
+
+.linechart .dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.linechart .xlabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
 }

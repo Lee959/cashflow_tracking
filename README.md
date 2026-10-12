@@ -1,7 +1,8 @@
 # Cashflow Tracker
 
-家庭现金流追踪工具。目前已完成：**从 Gmail 自动抓取账单**（金额、到期日、PDF），算出**每月固定支出**，按月查看。
-下一阶段接入 Plaid（TD / RBC / CIBC 的交易、余额、负债），补上不发邮件的扣款、做现金流预测和净资产追踪。
+家庭现金流追踪工具。目前已完成：**从 Gmail 自动抓取账单**（金额、到期日、PDF），算出**每月固定支出**，按月查看；
+通过 Plaid 连接 TD / RBC / CIBC，统计**这个月花了多少**、核对账单是否已扣款；追踪**净资产**（每天记录一次余额）。
+下一步：未来 30–60 天的现金流预测。
 
 - **后端**：Python / FastAPI，提供 JSON API，并在后台定时抓取 Gmail 账单（`app/`）
 - **前端**：React + TypeScript + Vite，liquid glass 风格界面（`frontend/`）
@@ -16,13 +17,15 @@
    （只和邮件账单的平均比，因为手动录入的支出不会出现在当月账单里）。
    可以往前翻月份（看过去的月份时显示那个月一共花了多少），但**不会显示未来月份**。
 2. **当月账单列表**：每笔账单的到期日、金额、付款方式，可以手动修改，有 PDF 的可以直接打开。
-3. **Bills by month**：最近 12 个月的柱状图，悬停看金额，点柱子跳到那个月。
-4. **Your usual month**：平常每个月的固定账单（月平均），按账单列出。
+3. **Bank & card spending**（连上银行后才有）：见下面的[银行账户](#银行账户plaid)。
+4. **Net worth**（净资产）：见下面的[净资产](#净资产net-worth)。
+5. **Bills by month**：最近 12 个月的柱状图，悬停看金额，点柱子跳到那个月。
+6. **Your usual month**：平常每个月的固定账单（月平均），按账单列出。
    两个月一次的水费、一年两次的地税，都折算成每月金额。算法：最近 12 个月里每个账单的总额 ÷ 覆盖的月数。
    在 Settings 手动录入的固定支出（没有账单邮件的，比如 Enbridge、健身房）也算在里面，按频率折算成每月金额
    （例如一年 $120 = 每月 $10），列表里标注 *entered by hand*。
 
-目前只统计 Gmail 里找到的账单；刷卡和银行账户里的其他支出要等接入 Plaid 后才能算进来。
+没连银行时只统计 Gmail 里找到的账单；连上真实银行后，首页大数字改成所有账户和信用卡一共花了多少。
 
 **付款方式**（自动从银行扣款、自动从卡扣款、自己手动付）从邮件里自动识别：
 - 账单邮件本身，比如 Hydro 的 "Automated Payment Withdrawal Date"、水费的 "registered with pre-authorized debit"
@@ -36,6 +39,7 @@
 **Settings（`/settings`）**：Gmail 连接、自动抓取状态和手动抓取、账单发件人管理、最近抓取记录，
 以及 **Fixed costs without emails**：手动录入不发账单邮件的固定支出（名称、金额、频率：每月 / 每两个月 / 每季度 /
 一年两次 / 每年，可选扣款日或下次到期日，类别）。可以修改、暂停（不计入总额）或删除。
+**Other assets & debts**：手动录入银行连接里没有的资产和负债（房子、车、在别处的贷款或房贷），计入净资产。
 **Find bill senders（`/settings/senders`）**：扫描 Gmail，勾选真正的账单发件人。
 
 ## 首次设置
@@ -100,6 +104,20 @@ Settings → **Bank accounts** → **Connect a bank**，会打开 Plaid 的窗�
   交易名称里有账单公司名字的（比如 HYDRO OTTAWA）优先匹配。
 - **首页大数字**：连上**真实银行**（production）后，自动改成"这个月一共花了多少"（所有账户和信用卡），账单是其中一部分。
   Sandbox 的测试数据只出现在 Bank & card spending 卡片里，标着 *Sandbox · test data*，不会混进首页大数字。
+
+## 净资产（Net worth）
+
+Dashboard 上的 **Net worth** 卡片：你拥有的减去你欠的。
+
+- **来源**：已连接银行的所有账户（支票、储蓄、投资、信用卡、贷款、房贷），加上 Settings → *Other assets & debts* 里手动录入的
+  （房子、车、别处的贷款）。信用卡和贷款的余额算作负债。
+- **历史曲线**：Plaid 只给当前余额，不给历史余额，所以应用自己记：每次同步银行（自动抓取每 6 小时一次）、
+  每次修改手动项目，都会记下**今天**每个账户的余额（同一天多次同步只保留最后一次）。曲线一天一个点，
+  从连上银行那天开始积累，**越早连上越好**。电脑没开的日子没有点，曲线直接连过去。
+- 卡片显示：当前净资产、和 30 天前比涨了还是跌了、拥有和欠的总额、按类别（现金、投资、房产、房贷、贷款、信用卡……）列出的每个账户。
+  悬停在曲线上（或者选中后用左右方向键）看每天的数字。
+- 删除一个银行连接或手动项目，只影响今天及以后，过去记下的点不变。
+- Sandbox 的测试余额只在 `PLAID_ENV=sandbox` 时显示，并标着 *Sandbox · test data*，不会和真实数据混在一起。
 
 ## 自动抓取
 
@@ -181,7 +199,7 @@ cd frontend && npm run lint && npm run build             # 前端检查和构建
 ```
 app/                      后端（Python）
   main.py                 FastAPI 入口：Google 登录、PDF 附件、托管前端构建产物
-  api.py                  JSON API（/api/dashboard、/api/settings、/api/sync、/api/manual-costs …）
+  api.py                  JSON API（/api/dashboard、/api/settings、/api/sync、/api/manual-costs、/api/networth、/api/assets …）
   scheduler.py            后台自动抓取 + 抓取记录
   cli.py                  命令行
   config.py               读取 .env；数据目录
@@ -203,10 +221,12 @@ app/                      后端（Python）
   plaid_client.py         Plaid API：Link token、换取 access token、账户、交易同步、撤销连接
   banks.py                银行连接：保存（加密）、同步余额和交易、列出、删除
   spending.py             银行支出统计（排除转账和还卡），账单与扣款的匹配
+  networth.py             净资产：每日余额快照、手动录入的资产和负债、历史曲线
   models.py               数据表（SQLite）
 frontend/                 前端（React + TypeScript + Vite）
   src/pages/              Dashboard、Settings、FindSenders
-  src/components/         FixedCosts、ManualCosts、MonthlyChart、BillsTable、TopBar
+  src/components/         FixedCosts、ManualCosts、MonthlyChart、BillsTable、TopBar、AuthGate、
+                          BankAccounts、BankSpending、NetWorthCard、OtherAssets
   src/styles.css          liquid glass 样式（浅色和深色模式）
 config/bill_senders.example.toml
 tests/                    后端测试（pytest）
@@ -268,6 +288,6 @@ tests/                    后端测试（pytest）
 - [x] 用银行交易核对账单是否真的扣款；把刷卡和其他支出算进"这个月花了多少"（真实银行连上后生效）
 - [x] Plaid production 批准，切换到正式环境
 - [ ] 连接真实的 TD / RBC / CIBC
-- [ ] 净资产：用 Investments 和贷款余额算总资产减总负债
-- [ ] 每日余额快照（Plaid 不提供历史余额，越早开始越好）
+- [x] 净资产：所有账户余额 + 手动录入的房子、车、贷款，总资产减总负债
+- [x] 每日余额快照（Plaid 不提供历史余额，越早开始越好）
 - [ ] 未来 30–60 天现金流预测

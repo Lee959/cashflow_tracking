@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
-from app import banks, google_auth, plaid_client, scheduler
+from app import banks, google_auth, networth, plaid_client, scheduler
 from app.bills import dashboard, discover, manual, service
 from app.bills.parser import PAYMENT_METHODS
 from app.bills.senders import (
@@ -107,6 +107,69 @@ def delete_manual_cost(cost_id: int):
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     return {"ok": True}
+
+
+@router.get("/networth")
+def get_networth():
+    return networth.summary()
+
+
+class AssetBody(BaseModel):
+    name: str
+    kind: str  # asset / debt
+    category: str
+    value: str
+
+
+@router.get("/assets")
+def list_assets():
+    return {
+        "items": [{"id": a.id, "name": a.name, "kind": a.kind, "category": a.category, "value": float(a.value),
+                   "updated_at": _iso(a.updated_at)} for a in networth.list_assets()],
+        "categories": networth.MANUAL_CATEGORIES,
+        "labels": networth.GROUP_LABELS,
+    }
+
+
+@router.post("/assets", status_code=201)
+def add_asset(body: AssetBody):
+    a = networth.save_asset(None, **_asset_fields(body))
+    return {"id": a.id}
+
+
+@router.put("/assets/{asset_id}")
+def update_asset(asset_id: int, body: AssetBody):
+    try:
+        networth.save_asset(asset_id, **_asset_fields(body))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.delete("/assets/{asset_id}")
+def delete_asset(asset_id: int):
+    try:
+        networth.delete_asset(asset_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+def _asset_fields(body: AssetBody) -> dict:
+    if not body.name.strip():
+        raise HTTPException(422, "Give it a name.")
+    if body.kind not in networth.MANUAL_CATEGORIES:
+        raise HTTPException(422, "Choose whether it's something you own or owe.")
+    if body.category not in networth.MANUAL_CATEGORIES[body.kind]:
+        raise HTTPException(422, f"Unknown category {body.category!r}")
+    try:
+        value = _amount(body.value)
+    except InvalidOperation:
+        value = None
+    if value is None or not value.is_finite() or not 0 <= value < 10**10:
+        raise HTTPException(422, "Enter the value, like 650000.")
+    return {"name": body.name.strip(), "kind": body.kind, "category": body.category,
+            "value": value.quantize(Decimal("0.01"))}
 
 
 @router.get("/plaid")
