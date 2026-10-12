@@ -1,7 +1,11 @@
 """App settings, loaded from .env.
 
 Variable names match the existing .env (including the PLAID_*_SECRETE spelling);
-the correctly spelled PLAID_*_SECRET names are accepted too.
+the correctly spelled PLAID_*_SECRET names are accepted too. Plaid secrets can instead live in
+the macOS Keychain (`python -m app.cli secure-secrets` moves them there).
+
+Data (database, bill PDFs) lives in ~/Library/Application Support/HouseholdBills, outside the
+project folder, because ~/Documents may sync to iCloud. APP_DATA_DIR overrides it.
 """
 
 import os
@@ -11,9 +15,14 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from app import keychain
 
-load_dotenv(PROJECT_ROOT / ".env")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+LEGACY_DATA_DIR = PROJECT_ROOT / "data"  # where data lived before it moved out of the project folder
+DEFAULT_DATA_DIR = Path.home() / "Library" / "Application Support" / "HouseholdBills"
+
+load_dotenv(ENV_FILE)
 
 
 def _env(*names: str, default: str = "") -> str:
@@ -69,7 +78,10 @@ class Settings:
 
     @property
     def plaid_secret(self) -> str:
-        return self.plaid_production_secret if self.plaid_env == "production" else self.plaid_sandbox_secret
+        """From .env if it's still there, otherwise from the Keychain."""
+        if self.plaid_env == "production":
+            return self.plaid_production_secret or keychain.get("plaid-production-secret") or ""
+        return self.plaid_sandbox_secret or keychain.get("plaid-sandbox-secret") or ""
 
     @property
     def db_path(self) -> Path:
@@ -94,7 +106,7 @@ def load_settings() -> Settings:
         plaid_production_secret=_env("PLAID_PRODUCTION_SECRETE", "PLAID_PRODUCTION_SECRET"),
         base_url=_env("APP_BASE_URL", default="http://localhost:8000").rstrip("/"),
         timezone=ZoneInfo(_env("APP_TIMEZONE", default="America/Toronto")),
-        data_dir=PROJECT_ROOT / "data",
+        data_dir=Path(_env("APP_DATA_DIR") or DEFAULT_DATA_DIR).expanduser(),
         secrets_dir=PROJECT_ROOT / "secrete",
         bill_senders_file=PROJECT_ROOT / "config" / "bill_senders.toml",
     )

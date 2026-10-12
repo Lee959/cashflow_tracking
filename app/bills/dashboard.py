@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from app import spending
 from app.bills import manual, service
 from app.config import settings
 from app.db import session_scope
@@ -37,6 +38,7 @@ def month_summary(month: str, on: date | None = None) -> dict:
     upcoming = [b for b in counted if b.due_date and b.due_date >= on]
 
     payments = payment_methods()
+    paid = spending.match_bill_payments(counted)
     by_category: dict[str, Decimal] = {}
     for b in counted:
         by_category[b.category] = by_category.get(b.category, Decimal(0)) + (b.amount or 0)
@@ -55,12 +57,13 @@ def month_summary(month: str, on: date | None = None) -> dict:
         "total": _sum(counted),
         "count": len(counted),
         "remaining": _sum(upcoming),
-        "next_bill": _bill_json(upcoming[0], on, payments) if upcoming else None,
+        "next_bill": _bill_json(upcoming[0], on, payments, paid) if upcoming else None,
         "history": [{"month": m, "total": float(t)} for m, t in history],
         "categories": [
             {"category": c, "total": float(t)} for c, t in sorted(by_category.items(), key=lambda kv: -kv[1])
         ],
-        "bills": [_bill_json(b, on, payments) for b in counted],
+        "bills": [_bill_json(b, on, payments, paid) for b in counted],
+        "bank": spending.month_spending(month, on),
         "statements": {"count": len(statements), "total": _sum(statements)},
         "needs_review": sum(1 for b in bills if b.status == "needs_review"),
     }
@@ -185,8 +188,9 @@ def _sum(bills: list[Bill]) -> float:
     return float(sum((b.amount or 0 for b in bills), Decimal(0)))
 
 
-def _bill_json(b: Bill, on: date, payments: dict[str, dict]) -> dict:
+def _bill_json(b: Bill, on: date, payments: dict[str, dict], paid: dict[int, dict]) -> dict:
     return {
+        "paid": paid.get(b.id),  # the bank transaction that paid it, once a bank is connected
         "payment": payments.get(b.biller),
         "id": b.id,
         "biller": b.biller,

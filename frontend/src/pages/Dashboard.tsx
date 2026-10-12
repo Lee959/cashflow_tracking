@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { api, type Bill, type Dashboard as DashboardData } from '../api'
+import { BankSpending } from '../components/BankSpending'
 import { BillsTable } from '../components/BillsTable'
 import { FixedCosts } from '../components/FixedCosts'
 import { MonthlyChart } from '../components/MonthlyChart'
@@ -67,6 +68,8 @@ export function Dashboard() {
             )}
           </section>
 
+          {data.bank && <BankSpending bank={data.bank} month={data.month} />}
+
           <section className="grid two">
             <div className="card glass">
               <h2>Bills by month</h2>
@@ -83,8 +86,10 @@ export function Dashboard() {
 /** The headline: how much went out on bills in the selected month, and what's still coming. */
 function MonthHero({ data, go, editBill }: { data: DashboardData; go: (m: string) => void; editBill: (id: number) => void }) {
   const isCurrent = data.month === data.current_month
-  const spent = data.total - data.remaining
-  const [dollars, cents] = money(spent).split('.')
+  const billsPaid = data.total - data.remaining
+  // With real bank data the headline is everything spent; with none (or Sandbox test data) it's the bills
+  const bank = data.bank && !data.bank.is_test_data ? data.bank : null
+  const [dollars, cents] = money(bank ? bank.total : billsPaid).split('.')
   // a month's bills only come from email, so compare with the emailed part of the fixed bills
   const usual = data.fixed?.items.filter((i) => i.source === 'email').reduce((sum, i) => sum + i.monthly, 0)
   const diff = usual ? data.total - usual : null
@@ -96,7 +101,9 @@ function MonthHero({ data, go, editBill }: { data: DashboardData; go: (m: string
     <section className="hero-panel glass month-hero" aria-label={`Spending in ${monthLong(data.month)}`}>
       <div className="hero-main">
         <div className="row spread">
-          <div className="eyebrow">Spent on bills · {monthLong(data.month)}</div>
+          <div className="eyebrow">
+            {bank ? 'Spent' : 'Spent on bills'} · {monthLong(data.month)}
+          </div>
           <div className="row" style={{ gap: 6 }}>
             {!isCurrent && (
               <button className="btn small" onClick={() => go(data.current_month)}>
@@ -122,16 +129,29 @@ function MonthHero({ data, go, editBill }: { data: DashboardData; go: (m: string
         </div>
         <div className="hero-sub">
           {isCurrent ? 'so far this month' : `in ${monthName(data.month)}`}
-          {data.total > 0 && data.remaining > 0 && <> · of {money(data.total)} due</>}
+          {bank
+            ? ' · all accounts and cards'
+            : data.total > 0 && data.remaining > 0 && <> · of {money(data.total)} due</>}
         </div>
-        {data.total > 0 && (
+        {!bank && data.total > 0 && (
           <div className="progress hero-progress" title="Bills whose due date has passed" aria-hidden>
-            <div style={{ width: `${(spent / data.total) * 100}%` }} />
+            <div style={{ width: `${(billsPaid / data.total) * 100}%` }} />
           </div>
         )}
         <p className="small muted hero-note">
-          {data.count} {data.count === 1 ? 'bill' : 'bills'} found in Gmail. Card and bank spending will be added once
-          the bank connection (Plaid) is set up.
+          {bank ? (
+            <>
+              Includes {money(billsPaid)} of bills so far. Transfers between your accounts and credit card payments
+              aren't counted twice.
+            </>
+          ) : (
+            <>
+              {data.count} {data.count === 1 ? 'bill' : 'bills'} found in Gmail.{' '}
+              {data.bank
+                ? 'The bank connection is in Sandbox (test data), so it isn’t counted here yet.'
+                : 'Card and bank spending will be added once a bank is connected in Settings.'}
+            </>
+          )}
         </p>
       </div>
 

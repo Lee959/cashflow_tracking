@@ -122,7 +122,7 @@ class ManualCost(Base):
 
 
 class PlaidItem(Base):
-    """Phase 2: one row per bank login linked through Plaid Link (TD, RBC, CIBC)."""
+    """One bank login connected through Plaid Link (TD, RBC, CIBC). access_token is encrypted."""
 
     __tablename__ = "plaid_items"
 
@@ -132,6 +132,56 @@ class PlaidItem(Base):
     access_token: Mapped[str] = mapped_column(Text)  # encrypted
     transactions_cursor: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    institution_id: Mapped[str | None] = mapped_column(String(64))
+    environment: Mapped[str | None] = mapped_column(String(16))  # sandbox / production: never mix their data
+    last_synced_at: Mapped[datetime | None]
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_code: Mapped[str | None] = mapped_column(String(64))  # e.g. ITEM_LOGIN_REQUIRED -> Reconnect
+    products: Mapped[str | None] = mapped_column(Text)  # comma-separated Plaid products on this connection
+
+
+class PlaidAccount(Base):
+    """A bank or credit card account under a PlaidItem, with its latest balances."""
+
+    __tablename__ = "plaid_accounts"
+
+    account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    item_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    official_name: Mapped[str | None] = mapped_column(String(255))
+    mask: Mapped[str | None] = mapped_column(String(8))
+    type: Mapped[str] = mapped_column(String(16))  # depository / credit / loan / investment
+    subtype: Mapped[str | None] = mapped_column(String(32))
+    currency: Mapped[str | None] = mapped_column(String(3))
+    current_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    available_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    credit_limit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.now, onupdate=datetime.now)
+    # credit cards, from Plaid Liabilities
+    statement_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    statement_date: Mapped[date | None]
+    minimum_payment: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    payment_due_date: Mapped[date | None]
+    is_overdue: Mapped[bool | None]
+
+
+class PlaidTransaction(Base):
+    """A bank or card transaction. amount follows Plaid: positive = money out, negative = money in."""
+
+    __tablename__ = "plaid_transactions"
+
+    transaction_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    item_id: Mapped[str] = mapped_column(String(64), index=True)
+    transaction_date: Mapped[date] = mapped_column("date", index=True)
+    name: Mapped[str] = mapped_column(Text)
+    merchant_name: Mapped[str | None] = mapped_column(String(255))
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    currency: Mapped[str | None] = mapped_column(String(3))
+    category: Mapped[str | None] = mapped_column(String(64))  # personal_finance_category.primary
+    category_detailed: Mapped[str | None] = mapped_column(String(128))
+    pending: Mapped[bool] = mapped_column(default=False)
+    payment_channel: Mapped[str | None] = mapped_column(String(16))
 
 
 class SyncRun(Base):
@@ -145,3 +195,29 @@ class SyncRun(Base):
     finished_at: Mapped[datetime | None]
     ok: Mapped[bool] = mapped_column(default=False)
     summary: Mapped[str] = mapped_column(Text, default="")
+
+
+class WebSession(Base):
+    """A browser signed in through the launch link (see app/auth.py). The cookie holds a random
+    token; only its SHA-256 is stored, so the database alone can't be used to sign in."""
+
+    __tablename__ = "web_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    expires_at: Mapped[datetime]
+    unlocked_at: Mapped[datetime | None]  # last Touch ID unlock; None = locked
+    last_seen_at: Mapped[datetime | None]
+    challenge: Mapped[str | None] = mapped_column(Text)  # pending WebAuthn challenge (base64url)
+
+
+class Passkey(Base):
+    """A Touch ID passkey that can unlock the app (WebAuthn, stays in this Mac's Secure Enclave)."""
+
+    __tablename__ = "passkeys"
+
+    credential_id: Mapped[str] = mapped_column(String(512), primary_key=True)  # base64url
+    public_key: Mapped[bytes]
+    sign_count: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    last_used_at: Mapped[datetime | None]

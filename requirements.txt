@@ -5,6 +5,8 @@ SQLAlchemy==2.1.4
 python-dotenv==1.2.4
 cryptography==50.0.2
 certifi==2026.7.22
+keyring==25.7.0
+webauthn==3.0.1
 
 # Gmail bills
 google-api-python-client==2.201.0
@@ -16,5 +18,6 @@ python-dateutil==2.9.0.post0
 # Bank data (phase 2)
 plaid-python==45.0.0
 
-# Tests
+# Tests and security checks
 pytest==9.1.1
+pip-audit==2.10.1

@@ -5,7 +5,7 @@
 
 - **后端**：Python / FastAPI，提供 JSON API，并在后台定时抓取 Gmail 账单（`app/`）
 - **前端**：React + TypeScript + Vite，liquid glass 风格界面（`frontend/`）
-- 数据存在本机 SQLite（`data/cashflow.db`），只在 `127.0.0.1` 上运行
+- 数据存在本机 SQLite（`~/Library/Application Support/HouseholdBills/`，不在会同步到 iCloud 的项目文件夹里），只在 `127.0.0.1` 上运行
 
 ## 页面
 
@@ -62,8 +62,10 @@
    ```bash
    .venv/bin/python -m app
    ```
-   打开 http://localhost:8000 → **Settings** → **Connect Gmail** → **Find bill senders** 勾选账单发件人 → 保存。
-   之后会自动抓取，不用再手动点。
+   会自动在浏览器里打开一个**一次性登录链接**（终端里也会打印出来）。第一次打开时设置 **Touch ID**，
+   以后每次用指纹解锁；30 分钟不操作会自动锁上，顶栏的 🔒 可以随时锁定。
+   然后 **Settings** → **Connect Gmail** → **Find bill senders** 勾选账单发件人 → 保存。之后会自动抓取。
+   换了电脑或重置了 Touch ID：`.venv/bin/python -m app.cli reset-login`，再重新启动设置一次。
 
 ### 开发前端时
 
@@ -73,6 +75,31 @@ cd frontend && npm run dev
 ```
 打开 http://localhost:5173，改代码会即时刷新，API 请求自动转发到 :8000。改完运行 `npm run build`，:8000 就会用新版本。
 Google 登录完成后会跳回 :8000（回调地址固定在那里），这是正常的。
+
+## 银行账户（Plaid）
+
+Settings → **Bank accounts** → **Connect a bank**，会打开 Plaid 的窗口，在里面选银行、登录。连接后会显示每个账户
+（支票、储蓄、信用卡、贷款、投资）和余额，交易记录会同步到本地数据库。
+
+- **现在是正式环境（`PLAID_ENV=production`）**：卡片上标着 *Live*，连接的是你真实的银行。
+  想用测试数据时把 `.env` 里改成 `PLAID_ENV=sandbox`（测试账号 `user_good` / `pass_good`）。
+  每个连接都记录了它来自哪个环境，测试数据永远不会和真实账户混在一起显示。
+- **申请的产品**（Pay As You Go，按每个连接每月计费）：Transactions（$0.30）、Liabilities（$0.20，信用卡结单余额、到期日、最低还款）、
+  Investments（$0.53，只在银行支持时才加上并计费）。第一次连接会拉取 **24 个月**的交易历史，可能要几分钟。
+- 每个连接有 **Sync**（刷新余额、交易和信用卡结单）和 **Remove**（在 Plaid 那边撤销授权，并删除本地的账户和交易）。
+- 银行要求重新登录时（改了密码、授权过期），连接旁会出现 **Reconnect**，用 Plaid 的更新模式重新登录，保留原来的连接和历史。
+- 同一个银行登录不能重复连接（会重复计费）；家里另一个人在同一家银行的账户可以另外连接。
+- 信用卡下面会显示结单余额、到期日和最低还款额，逾期会标红。
+- 每次自动抓取（每 6 小时）都会一起同步银行；只连了银行、没连 Gmail 也会照常同步。
+
+**银行数据在 Dashboard 上的用法：**
+- **Bank & card spending** 卡片：这个月从银行账户和信用卡花出去的钱（按类别）、收入、退款、最近的交易。
+  计算时只看银行账户和信用卡（不看贷款、投资账户），**自己账户之间的转账和还信用卡的钱不算**
+  （卡上的消费已经一笔笔算过了），退款单独列出，所以不会重复计算。
+- **账单是否已扣款**：账单金额和到期日前后 7 天内的一笔银行支出对得上，账单旁就显示 ✓ Paid 和日期；
+  交易名称里有账单公司名字的（比如 HYDRO OTTAWA）优先匹配。
+- **首页大数字**：连上**真实银行**（production）后，自动改成"这个月一共花了多少"（所有账户和信用卡），账单是其中一部分。
+  Sandbox 的测试数据只出现在 Bank & card spending 卡片里，标着 *Sandbox · test data*，不会混进首页大数字。
 
 ## 自动抓取
 
@@ -139,6 +166,12 @@ Google 登录完成后会跳回 :8000（回调地址固定在那里），这是�
 .venv/bin/python -m app.cli discover-senders --days 365  # 找出像账单的发件人
 .venv/bin/python -m app.cli reparse                      # 修改 bill_senders.toml 后重新解析（不访问 Gmail）
 .venv/bin/python -m app.cli plaid-check                  # 检查 Plaid 凭证
+.venv/bin/python -m app.cli plaid-sync                   # 刷新已连接银行的余额和交易
+.venv/bin/python -m app.cli secure-secrets               # 把 .env 里的 Plaid 密钥移到钥匙串，收紧文件权限
+.venv/bin/python -m app.cli security-check               # 一键安全检查（--quick 跳过依赖扫描）
+.venv/bin/python -m app.cli scan-secrets --history       # 在整个 git 历史里找密钥和个人信息
+.venv/bin/python -m app.cli install-hooks                # 安装提交前钩子
+.venv/bin/python -m app.cli reset-login                  # 忘掉 Touch ID 和所有会话
 .venv/bin/python -m pytest                               # 后端测试
 cd frontend && npm run lint && npm run build             # 前端检查和构建
 ```
@@ -151,7 +184,13 @@ app/                      后端（Python）
   api.py                  JSON API（/api/dashboard、/api/settings、/api/sync、/api/manual-costs …）
   scheduler.py            后台自动抓取 + 抓取记录
   cli.py                  命令行
-  config.py               读取 .env
+  config.py               读取 .env；数据目录
+  keychain.py             macOS 钥匙串（加密密钥、Plaid 密钥）
+  auth.py                 登录：一次性启动链接 + Touch ID（passkey）
+  security.py             Host 检查、跨站请求拦截、登录要求、安全响应头、日志遮盖
+  secret_scan.py          找密钥和个人信息（提交前钩子、security-check 用）
+  security_check.py       一键安全检查
+  secure.py               把 Plaid 密钥从 .env 迁到钥匙串，收紧文件权限
   google_auth.py          Gmail OAuth（refresh token 加密存储）
   gmail_client.py         Gmail API：搜索、解码正文、下载 PDF、限流重试
   bills/
@@ -161,7 +200,9 @@ app/                      后端（Python）
     dashboard.py          Dashboard 数据：固定支出、当月汇总、12 个月趋势
     manual.py             手动录入的固定支出（没有账单邮件的）
     discover.py           Find bill senders 的扫描和分类
-  plaid_client.py         Plaid（目前只有连接测试）
+  plaid_client.py         Plaid API：Link token、换取 access token、账户、交易同步、撤销连接
+  banks.py                银行连接：保存（加密）、同步余额和交易、列出、删除
+  spending.py             银行支出统计（排除转账和还卡），账单与扣款的匹配
   models.py               数据表（SQLite）
 frontend/                 前端（React + TypeScript + Vite）
   src/pages/              Dashboard、Settings、FindSenders
@@ -173,16 +214,48 @@ tests/                    后端测试（pytest）
 
 ## 安全
 
-- 服务只监听 `127.0.0.1`，没有登录功能，**不要部署到公网**。
-- Gmail token 用 `secrete/app.key` 加密后再存进数据库；`.env`、`secrete/`、`data/`、`config/bill_senders.toml` 都在 `.gitignore` 里。
+**银行部分**
+- **只读**：只申请了 Transactions、Liabilities、Investments，都是查看类权限。这个应用**没有能力转账或动你的钱**
+  （那需要 Auth / Transfer 之类的产品，从未申请，有测试保证这一点）。
+- **银行密码从不经过这个应用**：登录在 Plaid 自己的窗口（cdn.plaid.com 的 iframe）里完成，应用只拿到一个 access token。
+- **access token 加密存储**，加密密钥在 **macOS 钥匙串**里，不和数据库放在一起；任何 API 返回和日志里都不会出现 token（有测试检查）。
+- **Plaid 的生产密钥在钥匙串里**，不在 `.env` 里（`python -m app.cli secure-secrets` 负责迁移）。
+- 删除连接时会先在 Plaid 那边撤销授权，再删本地数据。
+- 没有用 Plaid webhook，所以不需要对公网开放任何端口。
+
+**登录**
+- **一次性启动链接 + Touch ID**：`python -m app` 每次运行都生成新的密钥，只通过终端和自动打开的浏览器给你；
+  打开后得到一个 HttpOnly、SameSite=Strict 的会话 cookie，再用 Touch ID（passkey，存在这台 Mac 的安全芯片里）解锁。
+  没解锁时所有数据接口一律返回 401，所以**这台 Mac 上的其他程序**（包括沙盒应用、浏览器扩展）也读不到你的数据。
+- 30 分钟不操作自动锁定；会话 7 天过期；数据库里只存会话令牌的哈希。
+
+**整个应用**
+- 服务只监听 `127.0.0.1`，只接受 Host 为 localhost 的请求（防 DNS 重绑定），其他网站发来的请求一律拒绝（防 CSRF），
+  有内容安全策略（CSP），也不允许被其他网站嵌入（防点击劫持）。没有登录功能，**不要部署到公网**。
+- 数据库和账单 PDF 在 `~/Library/Application Support/HouseholdBills/`，不会同步到 iCloud，权限只有你自己能读（700/600）；
+  FileVault 已开启，关机或锁屏时整盘加密。
+- `.env`、`secrete/` 只有你自己能读；它们和 `config/bill_senders.toml` 都在 `.gitignore` 里。
 - Gmail 只申请了只读权限（`gmail.readonly`），抓账单时只搜索已配置的发件人。
+- 没有 `/docs`、`/openapi.json` 这类接口说明页；接口返回禁止浏览器缓存；日志会自动遮盖 Plaid token 和启动链接里的密钥。
+- **提交前钩子**（`install-hooks`）：提交里有密钥、Plaid token、`.env`/数据库文件，或你的个人信息就拒绝提交。
+  个人信息清单在 `config/private_identifiers.txt`（不会被提交）。
+- **一键检查**：`.venv/bin/python -m app.cli security-check` 检查文件权限、钥匙串、登录、FileVault、git 历史、依赖漏洞。
+  建议每月跑一次。
 
-## Plaid 状态（2026-10-11 查看 dashboard）
+**仍然存在的风险（如实说明）**
+- 有"完全磁盘访问"权限、以你的身份运行的恶意程序，仍然可以直接读数据库文件和钥匙串项目（同一个 Python 读取时不会弹窗）。
+  登录挡住的是"只能通过网络访问本机"的程序；电脑本身被完全控制时，这里的保护挡不住。
+- GitHub 上已合并的 PR #1 仍然保留旧提交的引用；仓库是私有的，彻底清除需要 GitHub 客服或删库重建。
+- 交易和余额明文存在本地数据库里；靠 FileVault 和文件权限保护，没有额外加密。
+- `.env` 里还有 Google OAuth 客户端信息（不是银行相关，Google 也不把桌面应用的客户端密钥当机密），它仍在 iCloud 同步的文件夹里。
+- Time Machine 备份会包含数据库；建议备份盘开启加密。
 
-- Production 申请审核中，还差 **Security questionnaire**（Compliance Center 里 App profile 有 3 项待填）。
-- 已申请：Transactions、Recurring Transactions、Transactions Refresh、Investments、Liabilities、Enrich。
+## Plaid 状态（2026-10-12 查看 dashboard）
+
+- **Production 已批准**，计费方式 Pay As You Go（无月最低消费）。
+- 已开通：Transactions、Recurring Transactions、Transactions Refresh、Investments、Liabilities、Enrich；
+  应用只用 Transactions、Liabilities、Investments。
 - **Statements（银行月结单 PDF）只支持美国银行**，TD / RBC / CIBC 用不了，所以账单走 Gmail。
-- Sandbox 凭证可用。在 Production 批准前，用 `PLAID_ENV=sandbox`（默认值）开发。
 
 ## 下一步
 
@@ -190,6 +263,11 @@ tests/                    后端测试（pytest）
 - [x] 手动录入没有账单邮件的固定支出（Settings → Fixed costs without emails）
 - [ ] Green Button XML 导入（补齐 Enbridge 和 Hydro 的历史数据）
 - [ ] 开机自动启动服务（macOS launchd），这样电脑开着就能一直自动抓取
-- [ ] Plaid Link 接入 → 交易同步，用来核对账单是否真的扣款，并补上不发邮件的扣款
+- [x] Plaid Link 接入（Sandbox）→ 账户、余额、交易同步
+- [x] 自动抓取时一起同步银行交易
+- [x] 用银行交易核对账单是否真的扣款；把刷卡和其他支出算进"这个月花了多少"（真实银行连上后生效）
+- [x] Plaid production 批准，切换到正式环境
+- [ ] 连接真实的 TD / RBC / CIBC
+- [ ] 净资产：用 Investments 和贷款余额算总资产减总负债
 - [ ] 每日余额快照（Plaid 不提供历史余额，越早开始越好）
 - [ ] 未来 30–60 天现金流预测

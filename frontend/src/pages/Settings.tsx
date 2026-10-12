@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { api, type Settings as SettingsData } from '../api'
+import { BankAccounts } from '../components/BankAccounts'
 import { ManualCosts } from '../components/ManualCosts'
 import { TopBar } from '../components/TopBar'
 import { categoryLabel, dateTime, timeAgo } from '../format'
@@ -175,6 +176,8 @@ export function Settings() {
           </div>
 
           <div className="stack">
+            <BankAccounts />
+
             <section className="card glass">
               <div className="card-head">
                 <h2>Bill senders</h2>

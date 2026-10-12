@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
-from app import google_auth, scheduler
+from app import banks, google_auth, plaid_client, scheduler
 from app.bills import dashboard, discover, manual, service
 from app.bills.parser import PAYMENT_METHODS
 from app.bills.senders import (
@@ -106,6 +106,73 @@ def delete_manual_cost(cost_id: int):
         manual.delete_cost(cost_id)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.get("/plaid")
+def plaid_status():
+    """Connected banks (current PLAID_ENV only) and whether Plaid is set up at all."""
+    try:
+        plaid_client.get_client()
+        problem = None
+    except plaid_client.PlaidError as exc:
+        problem = str(exc)
+    return {"environment": settings.plaid_env, "problem": problem, "items": banks.list_items()}
+
+
+@router.post("/plaid/link-token")
+def plaid_link_token():
+    try:
+        return {"link_token": plaid_client.create_link_token()}
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+class PlaidConnect(BaseModel):
+    public_token: str
+    institution_name: str | None = None
+    institution_id: str | None = None
+
+
+@router.post("/plaid/connect")
+def plaid_connect(body: PlaidConnect):
+    try:
+        return banks.connect(body.public_token, body.institution_name, body.institution_id)
+    except banks.DuplicateConnection as exc:
+        raise HTTPException(409, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/plaid/items/{item_id}/link-token")
+def plaid_reconnect_token(item_id: str):
+    """Link token in update mode, for signing in to the bank again."""
+    try:
+        return {"link_token": banks.update_link_token(item_id)}
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/plaid/items/{item_id}/sync")
+def plaid_sync(item_id: str):
+    try:
+        return banks.sync_item(item_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.delete("/plaid/items/{item_id}")
+def plaid_remove(item_id: str):
+    try:
+        banks.remove(item_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
     return {"ok": True}
 
 

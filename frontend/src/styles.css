@@ -341,6 +341,12 @@ a {
   color: var(--ink-2);
 }
 
+.btn.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+
 .btn.icon {
   width: 38px;
   height: 38px;
@@ -852,7 +858,91 @@ tr.faded {
   color: var(--muted);
 }
 
+/* ---------- bank spending ---------- */
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.txns {
+  margin-top: 18px;
+}
+
+.txn-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.txn-row:last-child {
+  border-bottom: 0;
+}
+
+.txn-date {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.txn-name {
+  overflow-wrap: anywhere;
+}
+
+/* ---------- lock screen ---------- */
+
+.lock-card {
+  max-width: 480px;
+  margin: 18vh auto 0;
+  text-align: center;
+  padding: 36px 32px;
+}
+
+.lock-card h1 {
+  margin: 8px 0 12px;
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.lock-icon {
+  font-size: 34px;
+}
+
+.command {
+  display: inline-block;
+  margin: 4px 0 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--glass-strong);
+  font-size: 14px;
+  user-select: all;
+}
+
 /* ---------- settings ---------- */
+
+.bank {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+
+.bank-group {
+  margin-top: 12px;
+}
+
+.bank-group .label {
+  margin-bottom: 4px;
+}
+
+.bank-account {
+  padding: 4px 0;
+  font-size: 14px;
+}
 
 .kv {
   display: grid;

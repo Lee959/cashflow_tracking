@@ -85,6 +85,10 @@ export function ordinal(n: number): string {
   return `${n}${suffix}`
 }
 
+/** Plaid's "FOOD_AND_DRINK" -> "Food & drink" */
+export const plaidCategoryLabel = (category: string | null) =>
+  category ? capitalize(category.toLowerCase().replace(/_and_/g, ' & ').replace(/_/g, ' ')) : 'Other'
+
 const CATEGORY_LABELS: Record<string, string> = {
   utilities: 'Utilities',
   phone_internet: 'Phone & internet',

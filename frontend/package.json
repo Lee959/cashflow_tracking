@@ -10,8 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-plaid-link": "^5.0.0",
     "react-router": "^7.18.4"
   },
   "devDependencies": {
