@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
-from app import google_auth, scheduler
-from app.bills import dashboard, discover, service
+from app import banks, google_auth, networth, plaid_client, scheduler
+from app.bills import dashboard, discover, manual, service
 from app.bills.parser import PAYMENT_METHODS
 from app.bills.senders import (
     EXAMPLE_SENDERS,
@@ -20,7 +20,7 @@ from app.bills.senders import (
 )
 from app.config import settings
 from app.gmail_client import friendly_error
-from app.models import SyncRun
+from app.models import ManualCost, SyncRun
 
 router = APIRouter(prefix="/api")
 
@@ -41,7 +41,7 @@ class BillUpdate(BaseModel):
 @router.patch("/bills/{bill_id}")
 def update_bill(bill_id: int, body: BillUpdate):
     try:
-        amount = Decimal(body.amount.replace("$", "").replace(",", "").strip()) if body.amount else None
+        amount = _amount(body.amount)
         due = date.fromisoformat(body.due_date) if body.due_date else None
     except (InvalidOperation, ValueError):
         raise HTTPException(422, f"Couldn't read amount {body.amount!r} or date {body.due_date!r}")
@@ -63,6 +63,180 @@ def set_payment(biller: str, body: PaymentSetting):
         raise HTTPException(422, f"method must be one of {', '.join(PAYMENT_METHODS)}")
     service.set_payment_method(biller, body.method, body.detail)
     return {"ok": True, "payment": dashboard.payment_methods().get(biller)}
+
+
+class ManualCostBody(BaseModel):
+    name: str
+    amount: str
+    frequency: str = "monthly"
+    category: str = "other"
+    due_day: int | None = None
+    next_due_date: str | None = None
+    active: bool = True
+
+
+@router.get("/manual-costs")
+def list_manual_costs():
+    on = dashboard.today()
+    return {
+        "items": [_manual_cost_json(c, on) for c in manual.list_costs()],
+        "frequencies": list(manual.PER_YEAR),
+        "categories": manual.CATEGORIES,
+    }
+
+
+@router.post("/manual-costs", status_code=201)
+def add_manual_cost(body: ManualCostBody):
+    cost = manual.save_cost(None, **_manual_cost_fields(body))
+    return _manual_cost_json(cost, dashboard.today())
+
+
+@router.put("/manual-costs/{cost_id}")
+def update_manual_cost(cost_id: int, body: ManualCostBody):
+    try:
+        cost = manual.save_cost(cost_id, **_manual_cost_fields(body))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return _manual_cost_json(cost, dashboard.today())
+
+
+@router.delete("/manual-costs/{cost_id}")
+def delete_manual_cost(cost_id: int):
+    try:
+        manual.delete_cost(cost_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.get("/networth")
+def get_networth():
+    return networth.summary()
+
+
+class AssetBody(BaseModel):
+    name: str
+    kind: str  # asset / debt
+    category: str
+    value: str
+
+
+@router.get("/assets")
+def list_assets():
+    return {
+        "items": [{"id": a.id, "name": a.name, "kind": a.kind, "category": a.category, "value": float(a.value),
+                   "updated_at": _iso(a.updated_at)} for a in networth.list_assets()],
+        "categories": networth.MANUAL_CATEGORIES,
+        "labels": networth.GROUP_LABELS,
+    }
+
+
+@router.post("/assets", status_code=201)
+def add_asset(body: AssetBody):
+    a = networth.save_asset(None, **_asset_fields(body))
+    return {"id": a.id}
+
+
+@router.put("/assets/{asset_id}")
+def update_asset(asset_id: int, body: AssetBody):
+    try:
+        networth.save_asset(asset_id, **_asset_fields(body))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.delete("/assets/{asset_id}")
+def delete_asset(asset_id: int):
+    try:
+        networth.delete_asset(asset_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+def _asset_fields(body: AssetBody) -> dict:
+    if not body.name.strip():
+        raise HTTPException(422, "Give it a name.")
+    if body.kind not in networth.MANUAL_CATEGORIES:
+        raise HTTPException(422, "Choose whether it's something you own or owe.")
+    if body.category not in networth.MANUAL_CATEGORIES[body.kind]:
+        raise HTTPException(422, f"Unknown category {body.category!r}")
+    try:
+        value = _amount(body.value)
+    except InvalidOperation:
+        value = None
+    if value is None or not value.is_finite() or not 0 <= value < 10**10:
+        raise HTTPException(422, "Enter the value, like 650000.")
+    return {"name": body.name.strip(), "kind": body.kind, "category": body.category,
+            "value": value.quantize(Decimal("0.01"))}
+
+
+@router.get("/plaid")
+def plaid_status():
+    """Connected banks (current PLAID_ENV only) and whether Plaid is set up at all."""
+    try:
+        plaid_client.get_client()
+        problem = None
+    except plaid_client.PlaidError as exc:
+        problem = str(exc)
+    return {"environment": settings.plaid_env, "problem": problem, "items": banks.list_items()}
+
+
+@router.post("/plaid/link-token")
+def plaid_link_token():
+    try:
+        return {"link_token": plaid_client.create_link_token()}
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+class PlaidConnect(BaseModel):
+    public_token: str
+    institution_name: str | None = None
+    institution_id: str | None = None
+
+
+@router.post("/plaid/connect")
+def plaid_connect(body: PlaidConnect):
+    try:
+        return banks.connect(body.public_token, body.institution_name, body.institution_id)
+    except banks.DuplicateConnection as exc:
+        raise HTTPException(409, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/plaid/items/{item_id}/link-token")
+def plaid_reconnect_token(item_id: str):
+    """Link token in update mode, for signing in to the bank again."""
+    try:
+        return {"link_token": banks.update_link_token(item_id)}
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/plaid/items/{item_id}/sync")
+def plaid_sync(item_id: str):
+    try:
+        return banks.sync_item(item_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.delete("/plaid/items/{item_id}")
+def plaid_remove(item_id: str):
+    try:
+        banks.remove(item_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except plaid_client.PlaidError as exc:
+        raise HTTPException(502, str(exc))
+    return {"ok": True}
 
 
 @router.get("/settings")
@@ -171,6 +345,54 @@ def add_senders(body: AddSenders):
                           subject_includes=(word,) if word else ()))
     add_billers(settings.bill_senders_file, new, header_from=settings.bill_senders_file.parent / "bill_senders.example.toml")
     return {"added": len(new)}
+
+
+def _amount(text: str | None) -> Decimal | None:
+    """Reads "$1,234.50" as Decimal("1234.50"). Raises InvalidOperation if it isn't a number."""
+    return Decimal(text.replace("$", "").replace(",", "").strip()) if text else None
+
+
+def _manual_cost_fields(body: ManualCostBody) -> dict:
+    """The form as ManualCost columns, or a 422 that says what to fix."""
+    try:
+        amount = _amount(body.amount)
+        due = date.fromisoformat(body.next_due_date) if body.next_due_date else None
+    except (InvalidOperation, ValueError):
+        raise HTTPException(422, f"Couldn't read amount {body.amount!r} or date {body.next_due_date!r}")
+    if not body.name.strip():
+        raise HTTPException(422, "Give it a name.")
+    if amount is None or not amount.is_finite() or not 0 < amount < 10**9:
+        raise HTTPException(422, "Enter an amount, like 45.20.")
+    if body.frequency not in manual.PER_YEAR:
+        raise HTTPException(422, f"How often should be one of: {', '.join(manual.PER_YEAR)}")
+    if body.category not in manual.CATEGORIES:
+        raise HTTPException(422, f"Unknown category {body.category!r}")
+    if body.due_day is not None and not 1 <= body.due_day <= 31:
+        raise HTTPException(422, "Day of the month should be 1 to 31.")
+    return {
+        "name": body.name.strip(),
+        "category": body.category,
+        "amount": amount.quantize(Decimal("0.01")),
+        "frequency": body.frequency,
+        "due_day": body.due_day,
+        "next_due_date": due,
+        "active": body.active,
+    }
+
+
+def _manual_cost_json(c: ManualCost, on: date) -> dict:
+    return {
+        "id": c.id,
+        "name": c.name,
+        "category": c.category,
+        "amount": float(c.amount),
+        "frequency": c.frequency,
+        "due_day": c.due_day,
+        # the entered date moved forward past today, so the form always shows the next one
+        "next_due_date": _iso(manual.next_due(c, on)) if c.next_due_date else None,
+        "active": c.active,
+        "monthly": float(manual.monthly(c)),
+    }
 
 
 def _sync_status() -> dict:

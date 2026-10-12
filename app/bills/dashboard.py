@@ -6,7 +6,8 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.bills import service
+from app import spending
+from app.bills import manual, service
 from app.config import settings
 from app.db import session_scope
 from app.models import Bill, BillEmail, BillerPayment
@@ -37,6 +38,7 @@ def month_summary(month: str, on: date | None = None) -> dict:
     upcoming = [b for b in counted if b.due_date and b.due_date >= on]
 
     payments = payment_methods()
+    paid = spending.match_bill_payments(counted)
     by_category: dict[str, Decimal] = {}
     for b in counted:
         by_category[b.category] = by_category.get(b.category, Decimal(0)) + (b.amount or 0)
@@ -46,7 +48,7 @@ def month_summary(month: str, on: date | None = None) -> dict:
     history = service.monthly_totals(end, HISTORY_MONTHS)
 
     return {
-        "fixed": fixed_costs(),
+        "fixed": fixed_costs(on),
         "month": month,
         "current_month": current,
         "prev_month": service.shift_month(month, -1),
@@ -55,12 +57,13 @@ def month_summary(month: str, on: date | None = None) -> dict:
         "total": _sum(counted),
         "count": len(counted),
         "remaining": _sum(upcoming),
-        "next_bill": _bill_json(upcoming[0], on, payments) if upcoming else None,
+        "next_bill": _bill_json(upcoming[0], on, payments, paid) if upcoming else None,
         "history": [{"month": m, "total": float(t)} for m, t in history],
         "categories": [
             {"category": c, "total": float(t)} for c, t in sorted(by_category.items(), key=lambda kv: -kv[1])
         ],
-        "bills": [_bill_json(b, on, payments) for b in counted],
+        "bills": [_bill_json(b, on, payments, paid) for b in counted],
+        "bank": spending.month_spending(month, on),
         "statements": {"count": len(statements), "total": _sum(statements)},
         "needs_review": sum(1 for b in bills if b.status == "needs_review"),
     }
@@ -101,19 +104,22 @@ def _payment(method: str, detail: str | None, source: str, when: datetime | None
     }
 
 
-def fixed_costs() -> dict | None:
+def fixed_costs(on: date | None = None) -> dict | None:
     """What the regular bills cost per month, per biller, over the last 12 months.
 
     Each biller's bills in the window are summed and spread over the months covered, so
     water billed every 2 months and property tax billed twice a year become a per-month
     amount. With less than 12 months of history, the months actually covered are used.
+    Costs entered by hand (no bill email) are added at their per-month amount.
     """
+    on = on or today()
     current = service.current_month()
     first = service.shift_month(current, -(HISTORY_MONTHS - 1))
     earliest = service.earliest_bill_month()
-    if earliest is None:
+    manual_costs = manual.list_costs(active_only=True)
+    if earliest is None and not manual_costs:
         return None
-    start = max(first, earliest)
+    start = max(first, earliest or current)
     months = _months_between(start, current) + 1
 
     by_biller: dict[str, list[Bill]] = {}
@@ -134,6 +140,20 @@ def fixed_costs() -> dict | None:
             "bills": len(bills),
             "last_amount": float(last.amount),
             "last_due_date": last.due_date.isoformat() if last.due_date else None,
+            "source": "email",
+        })
+    for c in manual_costs:
+        due = manual.next_due(c, on)
+        items.append({
+            "biller": c.name,
+            "category": c.category,
+            "monthly": float(manual.monthly(c)),
+            "yearly": float(c.amount * manual.PER_YEAR[c.frequency]),
+            "cadence": _cadence(manual.PER_YEAR[c.frequency]),
+            "id": c.id,
+            "amount": float(c.amount),
+            "next_due_date": due.isoformat() if due else None,
+            "source": "manual",
         })
     items.sort(key=lambda i: -i["monthly"])
     monthly = sum(i["monthly"] for i in items)
@@ -168,8 +188,9 @@ def _sum(bills: list[Bill]) -> float:
     return float(sum((b.amount or 0 for b in bills), Decimal(0)))
 
 
-def _bill_json(b: Bill, on: date, payments: dict[str, dict]) -> dict:
+def _bill_json(b: Bill, on: date, payments: dict[str, dict], paid: dict[int, dict]) -> dict:
     return {
+        "paid": paid.get(b.id),  # the bank transaction that paid it, once a bank is connected
         "payment": payments.get(b.biller),
         "id": b.id,
         "biller": b.biller,

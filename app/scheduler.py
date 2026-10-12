@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from googleapiclient.errors import HttpError
 from sqlalchemy import select
 
-from app import google_auth
+from app import banks, google_auth, networth
 from app.bills import service
 from app.bills.senders import BillerConfigError
 from app.db import session_scope
@@ -46,27 +46,60 @@ def run_sync(trigger: str, months: list[str] | None = None, force: bool = False)
             run = SyncRun(trigger=trigger)
             s.add(run)
         months = months or default_months()
+        has_banks = bool(banks.list_items())
+        parts: list[str] = []
+        ok = True
+        # Gmail and banks are fetched independently: one failing doesn't stop the other
+        if google_auth.connected_account() or not has_banks:
+            gmail_ok, summary = _fetch_bills(months, force)
+            ok &= gmail_ok
+            parts.append(summary)
+        if has_banks:
+            banks_ok, summary = _fetch_banks()
+            ok &= banks_ok
+            parts.append(summary)
         try:
-            results = [service.sync_month(m, force=force) for m in months]
-            run.ok = True
-            run.summary = _summarize(months, results)
-            try:
-                service.refresh_payment_methods()
-            except Exception:  # payment methods are a nice-to-have; never fail the fetch over them
-                log.exception("Checking payment-setup emails failed")
-        except (google_auth.GmailNotConnected, BillerConfigError) as exc:
-            run.summary = str(exc)
-        except HttpError as exc:
-            run.summary = friendly_error(exc)
-        except Exception as exc:  # recorded so it shows up in Settings instead of vanishing in a log
-            log.exception("Bill fetch failed")
-            run.summary = f"Unexpected error: {exc}"
+            networth.take_snapshot()  # a point for today even when only hand-entered items exist
+        except Exception:
+            log.exception("Net worth snapshot failed")
+        run.ok = ok
+        run.summary = " · ".join(parts)
         run.finished_at = datetime.now()
         with session_scope() as s:
             s.merge(run)
         return run
     finally:
         _lock.release()
+
+
+def _fetch_bills(months: list[str], force: bool) -> tuple[bool, str]:
+    try:
+        results = [service.sync_month(m, force=force) for m in months]
+    except (google_auth.GmailNotConnected, BillerConfigError) as exc:
+        return False, str(exc)
+    except HttpError as exc:
+        return False, friendly_error(exc)
+    except Exception as exc:  # recorded so it shows up in Settings instead of vanishing in a log
+        log.exception("Bill fetch failed")
+        return False, f"Unexpected error: {exc}"
+    try:
+        service.refresh_payment_methods()
+    except Exception:  # payment methods are a nice-to-have; never fail the fetch over them
+        log.exception("Checking payment-setup emails failed")
+    return True, _summarize(months, results)
+
+
+def _fetch_banks() -> tuple[bool, str]:
+    try:
+        results = banks.sync_all()
+    except Exception as exc:
+        log.exception("Bank sync failed")
+        return False, f"Banks: unexpected error: {exc}"
+    failed = [r for r in results if "error" in r]
+    summary = f"Banks: {sum(r.get('added', 0) for r in results)} new transactions"
+    if failed:
+        summary += "; " + "; ".join(r["error"] for r in failed)
+    return len(failed) < len(results), summary
 
 
 def is_running() -> bool:
@@ -99,7 +132,7 @@ async def run_forever() -> None:
     await asyncio.sleep(STARTUP_DELAY_SECONDS)
     while True:
         try:
-            if google_auth.connected_account() and is_due():
+            if (google_auth.connected_account() or banks.list_items()) and is_due():
                 await asyncio.to_thread(run_sync, "auto")
         except SyncInProgress:
             pass

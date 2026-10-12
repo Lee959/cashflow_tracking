@@ -8,11 +8,11 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import google_auth, scheduler, security
+from app import auth, google_auth, scheduler, security
 from app.api import router as api_router
 from app.bills import service
 from app.config import PROJECT_ROOT, settings
@@ -24,6 +24,7 @@ FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    security.install_log_redaction()
     init_db()
     task = asyncio.create_task(scheduler.run_forever())
     yield
@@ -32,13 +33,68 @@ async def lifespan(_: FastAPI):
         await task
 
 
-app = FastAPI(title="Cashflow Tracker", lifespan=lifespan)
+# No /docs, /redoc or /openapi.json: there's no reason to publish a map of the API, even locally
+app = FastAPI(title="Cashflow Tracker", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 security.install(app)
 app.include_router(api_router)
 
 
 def _to_settings(**params: str) -> RedirectResponse:
     return RedirectResponse(f"/settings?{urlencode(params)}", status_code=303)
+
+
+@app.get("/auth/start")
+def auth_start(t: str = ""):
+    """The launch link opened by `python -m app`: signs this browser in (Touch ID unlock comes next)."""
+    cookie = auth.start_session(t)
+    if cookie is None:
+        return RedirectResponse("/?login=expired", status_code=303)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(auth.COOKIE, cookie, max_age=int(auth.SESSION_LIFETIME.total_seconds()),
+                        httponly=True, samesite="strict", path="/")
+    return response
+
+
+@app.get("/auth/status")
+def auth_status(request: Request):
+    return {"state": auth.state(request.cookies.get(auth.COOKIE)) if auth.ENFORCED else auth.UNLOCKED}
+
+
+def _auth_call(fn, *args):
+    try:
+        return fn(*args)
+    except auth.AuthError as exc:
+        raise HTTPException(403, str(exc))
+
+
+@app.post("/auth/passkey/register/options")
+def passkey_register_options(request: Request):
+    return Response(_auth_call(auth.registration_options, request.cookies.get(auth.COOKIE)),
+                    media_type="application/json")
+
+
+@app.post("/auth/passkey/register/verify")
+def passkey_register_verify(request: Request, credential: dict = Body(...)):
+    _auth_call(auth.verify_registration, request.cookies.get(auth.COOKIE), credential)
+    return {"state": auth.UNLOCKED}
+
+
+@app.post("/auth/passkey/unlock/options")
+def passkey_unlock_options(request: Request):
+    return Response(_auth_call(auth.authentication_options, request.cookies.get(auth.COOKIE)),
+                    media_type="application/json")
+
+
+@app.post("/auth/passkey/unlock/verify")
+def passkey_unlock_verify(request: Request, credential: dict = Body(...)):
+    _auth_call(auth.verify_authentication, request.cookies.get(auth.COOKIE), credential)
+    return {"state": auth.UNLOCKED}
+
+
+@app.post("/auth/lock")
+def auth_lock(request: Request):
+    auth.lock(request.cookies.get(auth.COOKIE))
+    return {"state": auth.LOCKED}
 
 
 @app.get("/auth/google/login")

@@ -5,6 +5,7 @@ secrete/
 # Local data: bills, PDFs, database
 data/
 config/bill_senders.toml
+config/private_identifiers.txt
 
 # Python
 .venv/

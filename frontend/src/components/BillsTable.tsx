@@ -78,6 +78,12 @@ export function BillsTable({ bills, editing, setEditing, onChanged }: Props) {
 
 function StatusChip({ bill }: { bill: Bill }) {
   if (bill.status === 'needs_review') return <span className="chip warn" title={bill.notes}>⚠ Needs amount</span>
+  if (bill.paid)
+    return (
+      <span className="chip ok" title={`${bill.paid.name} · ${bill.paid.account}`}>
+        ✓ {bill.paid.pending ? 'Paying' : 'Paid'} {dayMonth(bill.paid.date)}
+      </span>
+    )
   if (bill.status === 'statement')
     return <span className="chip" title="The email only says the statement is ready">Statement</span>
   if (bill.status === 'manual') return <span className="chip">Edited</span>

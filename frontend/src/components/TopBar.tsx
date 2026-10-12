@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router'
-import type { SyncStatus } from '../api'
+import { auth, type SyncStatus } from '../api'
 import { timeAgo } from '../format'
 
 /** Floating glass nav. Shows fetch health quietly; only problems get a coloured chip. */
@@ -18,6 +18,14 @@ export function TopBar({ sync }: { sync?: SyncStatus }) {
           </NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
+        <button
+          className="btn icon quiet"
+          title="Lock (Touch ID to open again)"
+          aria-label="Lock"
+          onClick={() => auth.lock().finally(() => window.dispatchEvent(new Event('auth-required')))}
+        >
+          🔒
+        </button>
       </div>
     </header>
   )

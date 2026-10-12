@@ -5,10 +5,17 @@
   discover-senders [--days N]                           find senders that look like bills
   reparse                                               re-run the parser on stored emails
   plaid-check                                           verify Plaid credentials (creates a link token)
+  plaid-sync                                            refresh balances and transactions for connected banks
+  secure-secrets                                        move Plaid secrets from .env to the Keychain; lock down files
+  reset-login                                           forget Touch ID passkeys and sessions (new Mac, reset Touch ID)
+  security-check [--quick]                              check permissions, Keychain, login, git, dependencies
+  scan-secrets [--staged | --history]                   look for secrets and personal details (pre-commit hook uses --staged)
+  install-hooks                                         install the git pre-commit hook
 """
 
 import argparse
 import sys
+from pathlib import Path
 
 from app import google_auth, scheduler
 from app.bills import service
@@ -33,6 +40,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("reparse", help="re-run the parser on stored emails")
     sub.add_parser("plaid-check", help="verify Plaid credentials")
+    sub.add_parser("plaid-sync", help="refresh balances and transactions for connected banks")
+    sub.add_parser("secure-secrets", help="move Plaid secrets from .env to the Keychain; lock down files")
+    sub.add_parser("reset-login", help="forget Touch ID passkeys and sessions")
+    check = sub.add_parser("security-check", help="check the whole security setup")
+    check.add_argument("--quick", action="store_true", help="skip the dependency vulnerability audits")
+    scan = sub.add_parser("scan-secrets", help="look for secrets and personal details")
+    scan.add_argument("--staged", action="store_true", help="only what's about to be committed")
+    scan.add_argument("--history", action="store_true", help="every commit, including authors and messages")
+    sub.add_parser("install-hooks", help="install the git pre-commit hook")
 
     args = parser.parse_args(argv)
     init_db()
@@ -81,6 +97,56 @@ def main(argv: list[str] | None = None) -> int:
 
             plaid_client.create_link_token()
             print(f"Plaid {settings.plaid_env} credentials work (link token created).")
+
+        elif args.command == "secure-secrets":
+            from app import secure
+            from app.config import ENV_FILE, PROJECT_ROOT
+
+            moved = secure.move_secrets_to_keychain(ENV_FILE)
+            print(f"Moved to the Keychain: {', '.join(moved)}" if moved else "No Plaid secrets left in .env")
+            changed = secure.lock_down(PROJECT_ROOT)
+            print(f"Permissions: {', '.join(changed)}" if changed else "Permissions already private")
+
+        elif args.command == "security-check":
+            from app import security_check
+
+            checks = security_check.run_all(include_audits=not args.quick)
+            for c in checks:
+                print(f"  {'✓' if c.ok else '✗'} {c.name}" + ("" if c.ok or not c.detail else f"  ({c.detail})"))
+            failed = sum(not c.ok for c in checks)
+            print(f"\n{len(checks) - failed} passed, {failed} need attention")
+            return 1 if failed else 0
+
+        elif args.command == "scan-secrets":
+            from app import secret_scan
+
+            findings = (secret_scan.scan_staged() if args.staged
+                        else secret_scan.scan_history() if args.history else secret_scan.scan_tree())
+            for f in findings:
+                print(f"  ✗ {f}")
+            if findings:
+                print("\nRemove these before committing (or add the file to .gitignore).", file=sys.stderr)
+                return 1
+            print("No secrets or personal details found.")
+
+        elif args.command == "install-hooks":
+            hook = Path(".git/hooks/pre-commit")
+            hook.write_text('#!/bin/sh\n# Blocks commits that contain secrets or personal details (app/secret_scan.py).\n'
+                            'cd "$(git rev-parse --show-toplevel)" && exec .venv/bin/python -m app.cli scan-secrets --staged\n')
+            hook.chmod(0o755)
+            print(f"Installed {hook}")
+
+        elif args.command == "reset-login":
+            from app import auth
+
+            removed = auth.reset()
+            print(f"Removed {removed} passkey(s) and all sessions. Start the app to set up Touch ID again.")
+
+        elif args.command == "plaid-sync":
+            from app import banks
+
+            for r in banks.sync_all() or [{"note": "no banks connected yet"}]:
+                print(r)
 
     except (google_auth.GmailNotConnected, BillerConfigError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
