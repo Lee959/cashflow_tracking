@@ -165,10 +165,14 @@ def test_no_api_map_and_no_caching(client):
 
 
 def test_logs_never_show_tokens_or_the_launch_secret():
-    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s"', (
-        "127.0.0.1", "GET", "/auth/start?t=abc123secret&x=1"), None)
+    from uvicorn.logging import AccessFormatter
+
+    # exactly what uvicorn logs for each request: (client, method, path, http version, status)
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d', (
+        "127.0.0.1:5000", "GET", "/auth/start?t=abc123secret&x=1", "1.1", 303), None)
     security.RedactSecrets().filter(record)
-    assert "abc123secret" not in record.getMessage() and "t=[redacted]" in record.getMessage()
+    line = AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False).format(record)
+    assert line == '127.0.0.1:5000 - "GET /auth/start?t=[redacted]&x=1 HTTP/1.1" 303 See Other'
 
     record = logging.LogRecord("app", logging.ERROR, "", 0, "bad token access-production-1234-abcd", None, None)
     security.RedactSecrets().filter(record)

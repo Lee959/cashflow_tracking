@@ -100,14 +100,23 @@ _SECRET_PATTERNS = [
 ]
 
 
+def _redact(text: str) -> str:
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 class RedactSecrets(logging.Filter):
+    """Scrubs the message and each argument in place; the arguments keep their shape because
+    uvicorn's access-log formatter unpacks them."""
+
     def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        redacted = message
-        for pattern, replacement in _SECRET_PATTERNS:
-            redacted = pattern.sub(replacement, redacted)
-        if redacted != message:
-            record.msg, record.args = redacted, None
+        if isinstance(record.msg, str):
+            record.msg = _redact(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(_redact(a) if isinstance(a, str) else a for a in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: _redact(v) if isinstance(v, str) else v for k, v in record.args.items()}
         return True
 
 
