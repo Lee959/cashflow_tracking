@@ -1,186 +1,186 @@
 # Cashflow Tracker
 
-家庭现金流追踪工具。目前已完成：**从 Gmail 自动抓取账单**（金额、到期日、PDF），算出**每月固定支出**，按月查看。
-下一阶段接入 Plaid（TD / RBC / CIBC 的交易、余额、负债），补上不发邮件的扣款、做现金流预测和净资产追踪。
+A household cash-flow tracking tool. Done so far: **automatically fetching bills from Gmail** (amount, due date, PDF), calculating **monthly fixed costs**, and viewing them by month.
+Next phase: connect Plaid (transactions, balances, and liabilities from TD / RBC / CIBC) to capture debits that don't come with an email, and to add cash-flow forecasting and net-worth tracking.
 
-- **后端**：Python / FastAPI，提供 JSON API，并在后台定时抓取 Gmail 账单（`app/`）
-- **前端**：React + TypeScript + Vite，liquid glass 风格界面（`frontend/`）
-- 数据存在本机 SQLite（`data/cashflow.db`），只在 `127.0.0.1` 上运行
+- **Backend**: Python / FastAPI. Serves a JSON API and fetches Gmail bills on a schedule in the background (`app/`)
+- **Frontend**: React + TypeScript + Vite, with a liquid-glass style UI (`frontend/`)
+- Data is stored in local SQLite (`data/cashflow.db`) and the app only runs on `127.0.0.1`
 
-## 页面
+## Pages
 
-**Dashboard（`/`）**：按重要程度从上往下排
+**Dashboard (`/`)**: ordered top to bottom by importance
 
-1. **这个月花了多少**（最大的数字）：本月已经付出去的账单金额（到期日已过的），进度条显示占本月到期总额的多少。
-   右边是**还要付多少**、下一笔是什么、哪天、**用什么方式付**，以及本月总额比平常的月份多还是少。
-   可以往前翻月份（看过去的月份时显示那个月一共花了多少），但**不会显示未来月份**。
-2. **当月账单列表**：每笔账单的到期日、金额、付款方式，可以手动修改，有 PDF 的可以直接打开。
-3. **Bills by month**：最近 12 个月的柱状图，悬停看金额，点柱子跳到那个月。
-4. **Your usual month**：平常每个月的固定账单（月平均），按账单列出。
-   两个月一次的水费、一年两次的地税，都折算成每月金额。算法：最近 12 个月里每个账单的总额 ÷ 覆盖的月数。
+1. **Spent this month** (the biggest number): the amount of bills already paid this month (due date has passed), with a progress bar showing what share of this month's total due it represents.
+   On the right: **how much is still left to pay**, what the next bill is, which day, **how it will be paid**, and whether this month's total is higher or lower than a usual month.
+   You can page back through previous months (for a past month it shows the total spent that month), but **future months are not shown**.
+2. **This month's bill list**: due date, amount, and payment method for each bill. These can be edited manually, and bills with a PDF can be opened directly.
+3. **Bills by month**: bar chart of the last 12 months. Hover to see the amount; click a bar to jump to that month.
+4. **Your usual month**: the regular fixed bills in a typical month (monthly average), listed by bill.
+   Bimonthly water bills and twice-yearly property tax are all converted to a monthly amount. Formula: each bill's total over the last 12 months ÷ the number of months covered.
 
-目前只统计 Gmail 里找到的账单；刷卡和银行账户里的其他支出要等接入 Plaid 后才能算进来。
+Currently only bills found in Gmail are counted; card spending and other bank account outflows will be included once Plaid is connected.
 
-**付款方式**（自动从银行扣款、自动从卡扣款、自己手动付）从邮件里自动识别：
-- 账单邮件本身，比如 Hydro 的 "Automated Payment Withdrawal Date"、水费的 "registered with pre-authorized debit"
-- 同一家公司的付款设置确认邮件，比如 Bell 的 "Confirmation - Change pre-authorized payments"，会读出银行或卡的名称和尾号（如 RBC ••321）
+**Payment method** (auto-debit from bank, auto-charge to card, or paid manually) is detected automatically from emails:
+- The bill email itself, e.g. Hydro's "Automated Payment Withdrawal Date", or the water bill's "registered with pre-authorized debit"
+- Payment-setup confirmation emails from the same company, e.g. Bell's "Confirmation - Change pre-authorized payments", from which the bank or card name and last digits are read (e.g. RBC ••321)
 
-以最近的一封为准。每次自动抓取时会顺便检查有没有新的设置邮件。邮件里没写的（比如地税），可以在账单的 Edit 里设置 "Paid by"，手动设置优先于邮件。
-悬停在付款方式上，可以看到它来自哪封邮件。
+The most recent email wins. Each automatic fetch also checks for new setup emails. For bills whose emails don't say (e.g. property tax), you can set "Paid by" under the bill's Edit; manual settings take priority over emails.
+Hover over a payment method to see which email it came from.
 
-信用卡月结单**不计入总额**：卡上的消费以后从银行交易来，避免和用卡支付的账单重复计算。
+Credit card statements are **not counted in the totals**: card spending will come from bank transactions later, which avoids double-counting bills paid by card.
 
-**Settings（`/settings`）**：Gmail 连接、自动抓取状态和手动抓取、账单发件人管理、最近抓取记录。
-**Find bill senders（`/settings/senders`）**：扫描 Gmail，勾选真正的账单发件人。
+**Settings (`/settings`)**: Gmail connection, auto-fetch status and manual fetch, bill sender management, recent fetch log.
+**Find bill senders (`/settings/senders`)**: scan Gmail and tick the senders that actually send bills.
 
-## 首次设置
+## First-time setup
 
-1. **Python 依赖**（已装在 `.venv`，新环境才需要）
+1. **Python dependencies** (already installed in `.venv`; only needed in a new environment)
    ```bash
    .venv/bin/pip install -r requirements.txt
    ```
 
-2. **前端依赖并构建**（需要 Node.js，已用 Homebrew 安装）
+2. **Frontend dependencies and build** (requires Node.js, already installed via Homebrew)
    ```bash
    cd frontend && npm install && npm run build
    ```
 
-3. **Google OAuth 同意屏幕**（Google Cloud Console → Google Auth Platform）
-   - 确认 Gmail API 已启用。
-   - Publishing status 是 **Testing** 时：要把用来收账单的那个 Gmail 地址加进 *Audience → Test users*，否则登录会被拦截（错误 403 access_denied）。
-     Testing 模式下授权 **7 天就会过期**，到时在 Settings 里重新点 Connect Gmail。
-   - 想免去每周重新授权：点 **Publish app** 改为 In production，不需要提交审核。
-     登录时会看到 "Google hasn't verified this app"，点 *Advanced → Go to …* 继续即可（最多 100 个用户，家庭使用足够）。
-   - OAuth Client 是 *Desktop app* 类型，回调地址 `http://localhost:8000/auth/google/callback` 不需要另外登记。
+3. **Google OAuth consent screen** (Google Cloud Console → Google Auth Platform)
+   - Make sure the Gmail API is enabled.
+   - When the Publishing status is **Testing**: add the Gmail address that receives the bills under *Audience → Test users*, otherwise sign-in will be blocked (error 403 access_denied).
+     In Testing mode, authorization **expires after 7 days**; when it does, click Connect Gmail again in Settings.
+   - To avoid re-authorizing every week: click **Publish app** to switch to In production. No review submission is needed.
+     At sign-in you'll see "Google hasn't verified this app"; click *Advanced → Go to …* to continue (up to 100 users, plenty for a household).
+   - The OAuth client is a *Desktop app* type, so the callback URL `http://localhost:8000/auth/google/callback` doesn't need to be registered separately.
 
-4. **启动**
+4. **Start**
    ```bash
    .venv/bin/python -m app
    ```
-   打开 http://localhost:8000 → **Settings** → **Connect Gmail** → **Find bill senders** 勾选账单发件人 → 保存。
-   之后会自动抓取，不用再手动点。
+   Open http://localhost:8000 → **Settings** → **Connect Gmail** → **Find bill senders**, tick the bill senders → Save.
+   After that, fetching happens automatically; no more manual clicks needed.
 
-### 开发前端时
+### Frontend development
 
-保持 `.venv/bin/python -m app` 运行，另开一个终端：
+Keep `.venv/bin/python -m app` running and open another terminal:
 ```bash
 cd frontend && npm run dev
 ```
-打开 http://localhost:5173，改代码会即时刷新，API 请求自动转发到 :8000。改完运行 `npm run build`，:8000 就会用新版本。
-Google 登录完成后会跳回 :8000（回调地址固定在那里），这是正常的。
+Open http://localhost:5173. Code changes hot-reload, and API requests are proxied to :8000. When done, run `npm run build` and :8000 will serve the new version.
+After Google sign-in completes, you'll be redirected back to :8000 (the callback URL is fixed there); this is expected.
 
-## 自动抓取
+## Automatic fetching
 
-- 网页服务运行时，后台**每 6 小时**抓一次本月和下个月的账单。时间间隔可以在 `.env` 里用 `APP_SYNC_INTERVAL_HOURS` 修改。
-  每次抓取都记录在 Settings 的 *Recent fetches* 里；Dashboard 顶部只在出问题时（Gmail 未连接或抓取失败）显示提示。
-- 重启服务不会多抓：如果距离上次抓取不到 6 小时就跳过。
-- Settings → **Fetch now** 立即抓一次。**More options** 里可以补抓最近 N 个月，或在修改解析规则后用 *Re-parse* 重新解析已存的邮件（不访问 Gmail）。
-- 遇到 Gmail 限流会自动等待重试。
-- ⚠ 只在服务运行时才会抓取。电脑关机或服务没开时不会抓，下次启动后会自动补上。
+- While the web service is running, it fetches this month's and next month's bills in the background **every 6 hours**. The interval can be changed in `.env` with `APP_SYNC_INTERVAL_HOURS`.
+  Every fetch is recorded under *Recent fetches* in Settings; the top of the Dashboard only shows a notice when something goes wrong (Gmail not connected or a fetch failed).
+- Restarting the service won't trigger extra fetches: if the last fetch was less than 6 hours ago, it's skipped.
+- Settings → **Fetch now** fetches immediately. Under **More options** you can backfill the last N months, or use *Re-parse* to re-parse stored emails after changing parsing rules (without contacting Gmail).
+- Gmail rate limits are handled by waiting and retrying automatically.
+- ⚠ Fetching only happens while the service is running. Nothing is fetched while the computer is off or the service isn't running; it catches up automatically on the next start.
 
-## 账单解析逻辑
+## Bill parsing logic
 
-每封来自已配置发件人的邮件算一张账单，按**到期日所在的月份**归入（也就是钱实际扣走的月份；没有到期日时按收到邮件的月份）。
-抓取某个月时会同时读取上个月收到的邮件，因为账单通常提前 2–3 周寄来。
+Each email from a configured sender counts as one bill, assigned to **the month of its due date** (i.e. the month the money is actually withdrawn; if there's no due date, the month the email was received).
+When fetching a month, emails received in the previous month are also read, since bills usually arrive 2–3 weeks in advance.
 
-金额和到期日按以下顺序提取（邮件正文和 PDF 附件文字都会读）：
-1. `config/bill_senders.toml` 里为该发件人写的 `amount_patterns` / `due_date_patterns`（最准，按需添加）
-2. 通用规则：`Amount due`、`Total due`、`New balance`、`Due date`、`Withdrawal date`、`Payment date` 等关键词后面的金额或日期
-3. 邮件里只有一个金额时，直接用它
+Amount and due date are extracted in this order (both the email body and PDF attachment text are read):
+1. `amount_patterns` / `due_date_patterns` written for that sender in `config/bill_senders.toml` (most accurate; add as needed)
+2. Generic rules: the amount or date following keywords like `Amount due`, `Total due`, `New balance`, `Due date`, `Withdrawal date`, `Payment date`
+3. If the email contains only one amount, that amount is used
 
-能处理的格式包括：负数抵扣（如 Hydro 的 `$-5.03`）、`2026 10 09` 这种空格分隔的日期（Bell）、没有 `$` 符号的金额（水费）、法语金额 `1 234,56 $`。
+Supported formats include: negative credits (e.g. Hydro's `$-5.03`), space-separated dates like `2026 10 09` (Bell), amounts without a `$` sign (water bill), and French-format amounts `1 234,56 $`.
 
-- "eStatement is ready" 这类只通知、不写金额的邮件标为 **statement notice**。
-- 其他找不到金额的标为 **needs review**，可以在网页上手填；手动改过的不会被重新解析覆盖。
-- 同一发件人的非账单邮件（营销、通知）用 `subject_includes` / `subject_excludes` 过滤。
+- Notification-only emails without an amount, such as "eStatement is ready", are marked as **statement notice**.
+- Others where no amount can be found are marked **needs review** and can be filled in on the web page; manually edited bills are not overwritten by re-parsing.
+- Non-bill emails from the same sender (marketing, notifications) are filtered with `subject_includes` / `subject_excludes`.
 
-### Find bill senders 的扫描逻辑
+### How Find bill senders scans
 
-1. 用 bill、statement、amount due 等关键词搜索 Gmail，跳过 Promotions 分类。
-2. 排除系统通知（Google Drive 共享等）、你自己的地址、个人邮箱、看起来是人名的邮箱、Re:/Fwd: 对话。
-3. 按发件人分组，判断来信频率：每月、每两个月、一年几次、一次性（比如租车就是一次性）。
-4. 判断发件人类型：账单、信用卡月结单、投资或银行账户月结单、消费或旅行收据。
-5. 打开最新一封邮件，看里面有没有金额。
-6. 同一家公司的提醒邮件（比如 Hydro 的 "Due date alert"）标为重复，建议跳过。
+1. Searches Gmail with keywords like bill, statement, amount due, skipping the Promotions category.
+2. Excludes system notifications (Google Drive shares, etc.), your own address, personal email addresses, addresses that look like a person's name, and Re:/Fwd: conversations.
+3. Groups by sender and determines how often they send: monthly, every two months, a few times a year, or one-off (e.g. a car rental is one-off).
+4. Determines the sender type: bill, credit card statement, investment or bank account statement, or purchase/travel receipt.
+5. Opens the latest email to check whether it contains an amount.
+6. Reminder emails from the same company (e.g. Hydro's "Due date alert") are marked as duplicates and suggested to skip.
 
-## 目前覆盖情况
+## Current coverage
 
-| 账单 | 来源 |
+| Bill | Source |
 |---|---|
-| Hydro Ottawa（电） | ✅ Gmail，每月 |
-| Ottawa 水费 | ✅ Gmail，每两个月 |
-| Ottawa 地税 | ✅ Gmail，一年两次 |
-| Bell 网络 | ✅ Gmail，每月 |
-| Enbridge 煤气、Reliance 热水器、My Ontario account、Anytime Fitness | ❌ 这个 Gmail 里没有账单邮件 |
-| Rogers Business Mobile | ❌ 账单可能发到家里另一个人的邮箱 |
+| Hydro Ottawa (electricity) | ✅ Gmail, monthly |
+| Ottawa water | ✅ Gmail, every two months |
+| Ottawa property tax | ✅ Gmail, twice a year |
+| Bell internet | ✅ Gmail, monthly |
+| Enbridge gas, Reliance water heater, My Ontario account, Anytime Fitness | ❌ No bill emails in this Gmail |
+| Rogers Business Mobile | ❌ Bills may go to another household member's email |
 
-补上这几项的办法：
-- **Enbridge**：在 Enbridge My Account → My Bill Options 开通 **eBill 并附 PDF**，账单就会进 Gmail，程序能直接解析。
-  My Account → Share My Data 还可以下载 24 个月的 Green Button XML 历史数据。
-- **Reliance**：在安大略常常合并在 Enbridge 账单里，先看一下 Enbridge 账单上有没有。
-- **Rogers**：转发到这个 Gmail，或以后支持连接第二个 Gmail。
-- **其余几项**：等接入 Plaid 的银行交易，或者手动录入。
+How to fill these gaps:
+- **Enbridge**: in Enbridge My Account → My Bill Options, turn on **eBill with PDF attached**; bills will then arrive in Gmail and can be parsed directly.
+  My Account → Share My Data also lets you download 24 months of history as Green Button XML.
+- **Reliance**: in Ontario this is often combined into the Enbridge bill; check the Enbridge bill first.
+- **Rogers**: forward to this Gmail, or support connecting a second Gmail later.
+- **Others**: wait for Plaid bank transactions, or enter manually.
 
-## 命令行
+## Command line
 
 ```bash
-.venv/bin/python -m app.cli sync-bills                   # 抓取本月和下个月（跟自动抓取一样）
-.venv/bin/python -m app.cli sync-bills --month 2026-09   # 指定月份
-.venv/bin/python -m app.cli sync-bills --last 12 --force # 重新下载最近 12 个月
+.venv/bin/python -m app.cli sync-bills                   # Fetch this month and next (same as auto-fetch)
+.venv/bin/python -m app.cli sync-bills --month 2026-09   # Specific month
+.venv/bin/python -m app.cli sync-bills --last 12 --force # Re-download the last 12 months
 .venv/bin/python -m app.cli list-bills --month 2026-09
-.venv/bin/python -m app.cli discover-senders --days 365  # 找出像账单的发件人
-.venv/bin/python -m app.cli reparse                      # 修改 bill_senders.toml 后重新解析（不访问 Gmail）
-.venv/bin/python -m app.cli plaid-check                  # 检查 Plaid 凭证
-.venv/bin/python -m pytest                               # 后端测试
-cd frontend && npm run lint && npm run build             # 前端检查和构建
+.venv/bin/python -m app.cli discover-senders --days 365  # Find senders that look like bills
+.venv/bin/python -m app.cli reparse                      # Re-parse after editing bill_senders.toml (no Gmail access)
+.venv/bin/python -m app.cli plaid-check                  # Check Plaid credentials
+.venv/bin/python -m pytest                               # Backend tests
+cd frontend && npm run lint && npm run build             # Frontend lint and build
 ```
 
-## 项目结构
+## Project structure
 
 ```
-app/                      后端（Python）
-  main.py                 FastAPI 入口：Google 登录、PDF 附件、托管前端构建产物
-  api.py                  JSON API（/api/dashboard、/api/settings、/api/sync …）
-  scheduler.py            后台自动抓取 + 抓取记录
-  cli.py                  命令行
-  config.py               读取 .env
-  google_auth.py          Gmail OAuth（refresh token 加密存储）
-  gmail_client.py         Gmail API：搜索、解码正文、下载 PDF、限流重试
+app/                      Backend (Python)
+  main.py                 FastAPI entry: Google sign-in, PDF attachments, serves frontend build
+  api.py                  JSON API (/api/dashboard, /api/settings, /api/sync …)
+  scheduler.py            Background auto-fetch + fetch log
+  cli.py                  Command line
+  config.py               Reads .env
+  google_auth.py          Gmail OAuth (refresh token stored encrypted)
+  gmail_client.py         Gmail API: search, decode body, download PDFs, rate-limit retry
   bills/
-    senders.py            读写 bill_senders.toml、生成 Gmail 搜索语句
-    parser.py             金额和到期日提取
-    service.py            按月同步、重新解析、查询
-    dashboard.py          Dashboard 数据：固定支出、当月汇总、12 个月趋势
-    discover.py           Find bill senders 的扫描和分类
-  plaid_client.py         Plaid（目前只有连接测试）
-  models.py               数据表（SQLite）
-frontend/                 前端（React + TypeScript + Vite）
-  src/pages/              Dashboard、Settings、FindSenders
-  src/components/         FixedCosts、MonthlyChart、BillsTable、TopBar
-  src/styles.css          liquid glass 样式（浅色和深色模式）
+    senders.py            Read/write bill_senders.toml, build Gmail search queries
+    parser.py             Amount and due-date extraction
+    service.py            Monthly sync, re-parse, queries
+    dashboard.py          Dashboard data: fixed costs, monthly summary, 12-month trend
+    discover.py           Find bill senders scanning and classification
+  plaid_client.py         Plaid (connection test only for now)
+  models.py               Database tables (SQLite)
+frontend/                 Frontend (React + TypeScript + Vite)
+  src/pages/              Dashboard, Settings, FindSenders
+  src/components/         FixedCosts, MonthlyChart, BillsTable, TopBar
+  src/styles.css          Liquid-glass styles (light and dark mode)
 config/bill_senders.example.toml
-tests/                    后端测试（pytest）
+tests/                    Backend tests (pytest)
 ```
 
-## 安全
+## Security
 
-- 服务只监听 `127.0.0.1`，没有登录功能，**不要部署到公网**。
-- Gmail token 用 `secrete/app.key` 加密后再存进数据库；`.env`、`secrete/`、`data/`、`config/bill_senders.toml` 都在 `.gitignore` 里。
-- Gmail 只申请了只读权限（`gmail.readonly`），抓账单时只搜索已配置的发件人。
+- The service only listens on `127.0.0.1` and has no login, so **do not deploy it to the public internet**.
+- The Gmail token is encrypted with `secrete/app.key` before being stored in the database; `.env`, `secrete/`, `data/`, and `config/bill_senders.toml` are all in `.gitignore`.
+- Gmail access is read-only (`gmail.readonly`), and fetching only searches configured senders.
 
-## Plaid 状态（2026-10-11 查看 dashboard）
+## Plaid status (dashboard checked 2026-10-11)
 
-- Production 申请审核中，还差 **Security questionnaire**（Compliance Center 里 App profile 有 3 项待填）。
-- 已申请：Transactions、Recurring Transactions、Transactions Refresh、Investments、Liabilities、Enrich。
-- **Statements（银行月结单 PDF）只支持美国银行**，TD / RBC / CIBC 用不了，所以账单走 Gmail。
-- Sandbox 凭证可用。在 Production 批准前，用 `PLAID_ENV=sandbox`（默认值）开发。
+- Production application under review; the **Security questionnaire** is still outstanding (3 items to fill in under App profile in the Compliance Center).
+- Requested: Transactions, Recurring Transactions, Transactions Refresh, Investments, Liabilities, Enrich.
+- **Statements (bank statement PDFs) only support US banks**, so TD / RBC / CIBC can't use it — that's why bills come from Gmail.
+- Sandbox credentials work. Until Production is approved, develop with `PLAID_ENV=sandbox` (the default).
 
-## 下一步
+## Next steps
 
-- [ ] Enbridge 开通 eBill 附 PDF；Rogers 账单转发到这个 Gmail
-- [ ] 手动录入没有账单邮件的固定支出（Anytime Fitness、My Ontario 等）
-- [ ] Green Button XML 导入（补齐 Enbridge 和 Hydro 的历史数据）
-- [ ] 开机自动启动服务（macOS launchd），这样电脑开着就能一直自动抓取
-- [ ] Plaid Link 接入 → 交易同步，用来核对账单是否真的扣款，并补上不发邮件的扣款
-- [ ] 每日余额快照（Plaid 不提供历史余额，越早开始越好）
-- [ ] 未来 30–60 天现金流预测
+- [ ] Turn on Enbridge eBill with PDF; forward Rogers bills to this Gmail
+- [ ] Manually enter fixed costs that have no bill emails (Anytime Fitness, My Ontario, etc.)
+- [ ] Green Button XML import (to backfill Enbridge and Hydro history)
+- [ ] Start the service automatically at boot (macOS launchd), so fetching runs whenever the computer is on
+- [ ] Plaid Link integration → transaction sync, to verify bills were actually debited and to capture debits without emails
+- [ ] Daily balance snapshots (Plaid doesn't provide historical balances, so the earlier the better)
+- [ ] 30–60 day cash-flow forecast
